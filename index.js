@@ -10,7 +10,7 @@ app.use((req, res, next) => {
 });
 
 const ES_TOKEN = process.env.ES_TOKEN;
-const ES_API_BASE = 'https://easy-sales.com/api/v1';
+const ES_API_BASE = 'https://easy-sales.com/api/v2';
 
 app.get('/test', (req, res) => {
   res.json({ status: 'ok', message: 'StocAI Proxy functional!' });
