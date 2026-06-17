@@ -1,34 +1,11 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const app = express();
-
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.sendStatus(200);
-  next();
-});
-
-const ES_TOKEN = process.env.ES_TOKEN;
-const ES_API_BASE = 'https://easy-sales.com/api/v2';
-
-app.get('/test', (req, res) => {
-  res.json({ status: 'ok', message: 'StocAI Proxy functional!' });
-});
-
-app.get('/orders', async (req, res) => {
-  try {
-  const resp = await fetch(`${ES_API_BASE}/orders`, {
-      headers: {
-        'Authorization': `Bearer ${ES_TOKEN}`,
-        'Accept': 'application/json'
-      }
-    });
-    const data = await resp.json();
-    res.json(data);
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.listen(process.env.PORT || 3000);
+app.use(express.json());
+app.use((req,res,next)=>{res.header('Access-Control-Allow-Origin','*');res.header('Access-Control-Allow-Headers','Content-Type');if(req.method==='OPTIONS')return res.sendStatus(200);next();});
+const ES_TOKEN=process.env.ES_TOKEN;
+const ANTHROPIC_KEY=process.env.ANTHROPIC_API_KEY;
+app.get('/test',(req,res)=>res.json({status:'ok',ai:!!ANTHROPIC_KEY,es:!!ES_TOKEN}));
+app.get('/orders',async(req,res)=>{try{const r=await fetch('https://easy-sales.com/api/v2/orders',{headers:{'Authorization':`Bearer ${ES_TOKEN}`,'Accept':'application/json'}});res.json(await r.json());}catch(e){res.status(500).json({error:e.message});}});
+app.post('/ai',async(req,res)=>{try{const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01'},body:JSON.stringify(req.body)});res.json(await r.json());}catch(e){res.status(500).json({error:e.message});}});
+app.listen(process.env.PORT||3000,()=>console.log('OK'));
