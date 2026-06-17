@@ -18,7 +18,7 @@ app.get('/test', (req, res) => {
 
 app.get('/orders', async (req, res) => {
   try {
-    const resp = await fetch(`${ES_API_BASE}/orders?status=new&per_page=50`, {
+  const resp = await fetch(`${ES_API_BASE}/orders`, {
       headers: {
         'Authorization': `Bearer ${ES_TOKEN}`,
         'Accept': 'application/json'
