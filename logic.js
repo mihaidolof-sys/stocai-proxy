@@ -62,10 +62,16 @@ async function resolveProduct(p) {
 }
 
 function classify(status) {
-  const s = (status || '').toLowerCase();
-  if (['returned','retur','refused','refuzat','returnata','returnată'].some(x => s.includes(x))) return 'return';
-  if (s.includes('cancel') || s.includes('anulat')) return 'return';
-  if (['draft','ciorna'].some(x => s.includes(x))) return 'ignore';
+  const s = (status || '').toLowerCase().trim();
+  // Retur / anulare (romaneste + engleza) - produsul se intoarce sau nu pleaca
+  const returnWords = ['returned','retur','returnat','returnată','returnata','refused','refuzat','refuzată'];
+  const cancelWords = ['cancel','canceled','cancelled','anulat','anulată','anulata'];
+  if (returnWords.some(x => s.includes(x))) return 'return';
+  if (cancelWords.some(x => s.includes(x))) return 'return';
+  // Statusuri care NU sunt vanzari valide
+  const ignoreWords = ['draft','ciorna','ciornă','nefinalizat','nefinalizată','nefinalizata','incomplet','incompletă','incompleta','eroare','erori','error'];
+  if (ignoreWords.some(x => s.includes(x))) return 'ignore';
+  // Vanzare reala: Noua, Primita, In procesare, Finalizata, Completed
   return 'sale';
 }
 
