@@ -284,15 +284,14 @@ app.post('/reset-sales', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// METRICI DE BUSINESS - pentru dashboard si AI
+// METRICI DE BUSINESS - pe luna curenta + pe zi
 app.get('/business', async (req, res) => {
   try {
-    const [sum7, sum30, top30, channels30, daily30, prices, stock] = await Promise.all([
-      db.getSalesSummary(7), db.getSalesSummary(30),
-      db.getTopProducts(30, 10), db.getChannelStats(30),
-      db.getDailyOrders(30), db.getAvgPrices(), db.getStock()
+    const [month, daily, topMonth, channelsMonth, sum7, prices, stock] = await Promise.all([
+      db.getMonthSummary(), db.getDailyThisMonth(),
+      db.getTopProductsMonth(10), db.getChannelStatsMonth(),
+      db.getSalesSummary(7), db.getAvgPrices(), db.getStock()
     ]);
-    // Valoarea stocului = qty * pret mediu de vanzare
     let stockValue = 0;
     const stockValued = stock.map(s => {
       const price = prices[s.key] || 0;
@@ -300,15 +299,16 @@ app.get('/business', async (req, res) => {
       stockValue += val;
       return { key: s.key, label: s.label, qty: s.qty, avgPrice: price, value: val };
     });
-    // Adauga label la top produse
     const labelMap = {}; stock.forEach(s => labelMap[s.key] = s.label);
-    const topLabeled = top30.map(t => ({ ...t, label: labelMap[t.key] || t.key }));
+    const topLabeled = topMonth.map(t => ({ ...t, label: labelMap[t.key] || t.key }));
+    const monthName = new Date().toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
 
     res.json({
-      sales7: sum7, sales30: sum30,
+      monthName,
+      month, sales7: sum7,
+      daily,
       topProducts: topLabeled,
-      channels: channels30,
-      daily: daily30,
+      channels: channelsMonth,
       stockValue: +stockValue.toFixed(2),
       stockValued
     });
