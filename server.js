@@ -35,17 +35,20 @@ function detectChannel(o) {
 }
 
 // ---- Preia comenzi din Easy Sales (toate paginile, pana se termina) ----
-async function fetchOrders(maxPages = 60) {
+async function fetchOrders(maxPages = 120) {
   let all = [];
+  let prevFirstId = null;
   for (let p = 1; p <= maxPages; p++) {
     const r = await fetch(`${ES_BASE}/orders?page=${p}`, { headers: H() });
     if (!r.ok) break;
     const d = await r.json();
     const list = d.data || d.orders || (Array.isArray(d) ? d : []);
-    if (!list.length) break;
+    if (!list.length) break;  // pagina goala = ultima
+    // protectie anti-bucla: daca pagina returneaza aceleasi date (API ignora ?page)
+    const firstId = String(list[0].id || list[0].order_display_id || '');
+    if (firstId && firstId === prevFirstId) break;
+    prevFirstId = firstId;
     all = all.concat(list);
-    // daca pagina are mai putine de ~asteptat, probabil e ultima
-    if (list.length < 15) break;
   }
   return all;
 }
@@ -318,25 +321,19 @@ app.get('/business', async (req, res) => {
 // DIAGNOZA: arata structura unei comenzi reale (ca sa identific canalul)
 app.get('/inspect', async (req, res) => {
   try {
-    const orders = await fetchOrders(1);
+    // Test paginare: cate comenzi vin total
+    const allOrders = await fetchOrders();
+    const dates = allOrders.map(o => o.order_date || o.created_at || o.date).filter(Boolean);
+    const sorted = dates.slice().sort();
+    // distributie pe luna
+    const byMonth = {};
+    for (const d of dates) {
+      const m = String(d).substring(0, 7);
+      byMonth[m] = (byMonth[m] || 0) + 1;
+    }
+    const orders = allOrders;
     if (!orders.length) return res.json({ msg: 'nicio comanda' });
     const o = orders[0];
-    // Extrage doar campurile relevante pentru canal/valoare
-    const sample = {
-      toate_cheile: Object.keys(o),
-      marketplace_id: o.marketplace_id,
-      marketplace: o.marketplace,
-      website: o.website,
-      channel: o.channel,
-      sales_channel: o.sales_channel,
-      account: o.account,
-      account_name: o.account_name,
-      value: o.value,
-      total_value: o.total_value,
-      order_date: o.order_date,
-      status: o.status
-    };
-    // Statistica: ce valori de canal apar in toate comenzile
     const channels = {};
     const statuses = {};
     for (const ord of orders) {
@@ -345,7 +342,15 @@ app.get('/inspect', async (req, res) => {
       const st = ord.status || 'fara_status';
       statuses[st] = (statuses[st] || 0) + 1;
     }
-    res.json({ sample, channels_gasite: channels, statusuri_gasite: statuses });
+    res.json({
+      total_comenzi_trase: allOrders.length,
+      prima_data: sorted[0],
+      ultima_data: sorted[sorted.length-1],
+      pe_luna: byMonth,
+      exemplu_order_date: o.order_date,
+      channels_gasite: channels,
+      statusuri_gasite: statuses
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
