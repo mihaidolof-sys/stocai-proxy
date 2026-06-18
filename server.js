@@ -269,6 +269,19 @@ app.post('/ai', async (req, res) => {
 // Forteaza sync manual
 app.post('/sync', async (req, res) => { await sync(); res.json({ ok: true }); });
 
+// RESET sales_log si re-sincronizare (pentru a repopula canal+valoare corect)
+app.post('/reset-sales', async (req, res) => {
+  try {
+    await db.pool.query('DELETE FROM sales_log');
+    // Stergem marcajul de "procesat" doar pentru vanzari, ca sa reintre in sales_log
+    // (NU atingem stocul - doar repopulam istoricul de analiza)
+    await db.pool.query(`DELETE FROM processed_orders WHERE kind IN ('sale_initial')`);
+    await db.setMeta('initialized', '');  // forteaza re-marcarea ca "initial" fara scadere
+    await sync();
+    res.json({ ok: true, msg: 'Sales resetate si resincronizate' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // METRICI DE BUSINESS - pentru dashboard si AI
 app.get('/business', async (req, res) => {
   try {
