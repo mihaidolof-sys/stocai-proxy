@@ -122,7 +122,13 @@ async function sync() {
       await db.markProcessed(id, 'sale', deductions);
       processed++;
     } else if (kind === 'return') {
-      // Retururile NU se adauga automat - se marcheaza pentru decizie manuala
+      // Retururi/anulari DOAR de azi inainte (nu cele vechi din trecut)
+      // La prima rulare, marcam toate retururile vechi ca "ignorate" ca sa nu apara
+      if (firstRun) {
+        await db.markProcessed(id, 'return_old', null);
+        continue;
+      }
+      // Doar retururile noi (aparute dupa instalare) ajung in lista de decizie
       if (!(await db.isProcessed(id))) {
         const value = parseFloat(o.total_value || o.value || 0) || 0;
         await db.markProcessed(id, 'return_pending', { products, deductions, value });
@@ -268,6 +274,28 @@ app.post('/ai', async (req, res) => {
       body: JSON.stringify(req.body)
     });
     res.json(await r.json());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// RESET COMPLET: re-seed stoc la valorile initiale + re-marcheaza tot ca baseline
+// (foloseste cand stocul s-a stricat din cauza unor scaderi gresite)
+app.post('/reset-all', async (req, res) => {
+  try {
+    // 1. Reseteaza stocul la valorile initiale din SEED_STOCK
+    for (const [key, s] of Object.entries(db.SEED_STOCK)) {
+      await db.pool.query('UPDATE stock SET qty=$1 WHERE key=$2', [s.qty, key]);
+    }
+    // 2. Goleste tot istoricul de procesare si jurnalul
+    await db.pool.query('DELETE FROM processed_orders');
+    await db.pool.query('DELETE FROM restocked_returns');
+    await db.pool.query('DELETE FROM return_dispositions');
+    await db.pool.query('DELETE FROM sales_log');
+    await db.pool.query('DELETE FROM journal');
+    // 3. Reseteaza flag-ul de initializare => urmatorul sync e "firstRun" (marcheaza tot ca baseline, fara scaderi)
+    await db.setMeta('initialized', '');
+    // 4. Resincronizare
+    await sync();
+    res.json({ ok: true, msg: 'Reset complet + resincronizare. Stocul e la baseline, doar comenzile noi de acum vor scadea.' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
