@@ -34,16 +34,18 @@ function detectChannel(o) {
   return 'necunoscut';
 }
 
-// ---- Preia comenzi din Easy Sales (mai multe pagini) ----
-async function fetchOrders(pages = 8) {
+// ---- Preia comenzi din Easy Sales (toate paginile, pana se termina) ----
+async function fetchOrders(maxPages = 60) {
   let all = [];
-  for (let p = 1; p <= pages; p++) {
+  for (let p = 1; p <= maxPages; p++) {
     const r = await fetch(`${ES_BASE}/orders?page=${p}`, { headers: H() });
     if (!r.ok) break;
     const d = await r.json();
     const list = d.data || d.orders || (Array.isArray(d) ? d : []);
     if (!list.length) break;
     all = all.concat(list);
+    // daca pagina are mai putine de ~asteptat, probabil e ultima
+    if (list.length < 15) break;
   }
   return all;
 }
@@ -52,7 +54,7 @@ async function fetchOrders(pages = 8) {
 async function sync() {
   if (!ES_TOKEN) { console.log('No ES_TOKEN'); return; }
   let orders;
-  try { orders = await fetchOrders(8); }
+  try { orders = await fetchOrders(); }
   catch (e) { console.log('fetch err', e.message); return; }
 
   const firstRun = !(await db.getMeta('initialized'));
