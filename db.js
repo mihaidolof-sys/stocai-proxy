@@ -336,10 +336,52 @@ async function getAvgPrices() {
   return map;
 }
 
+// Sumar pe LUNA CALENDARISTICA curenta (de la 1 ale lunii)
+async function getMonthSummary() {
+  const { rows } = await pool.query(
+    `SELECT COUNT(DISTINCT order_id)::int AS orders, COALESCE(SUM(value_lei),0)::numeric AS revenue
+     FROM (SELECT DISTINCT order_id, value_lei FROM sales_log
+           WHERE sold_at >= date_trunc('month', now())) t`
+  );
+  const orders = rows[0].orders, revenue = +rows[0].revenue;
+  return { orders, revenue, avgOrder: orders ? +(revenue/orders).toFixed(2) : 0 };
+}
+
+// Vanzari pe zi in luna curenta
+async function getDailyThisMonth() {
+  const { rows } = await pool.query(
+    `SELECT DATE(sold_at) AS day, COUNT(DISTINCT order_id)::int AS orders, COALESCE(SUM(value_lei),0)::numeric AS revenue
+     FROM sales_log WHERE sold_at >= date_trunc('month', now())
+     GROUP BY DATE(sold_at) ORDER BY day`
+  );
+  return rows.map(r => ({ day: r.day, orders: r.orders, revenue: +r.revenue }));
+}
+
+// Top produse luna curenta
+async function getTopProductsMonth(limit = 10) {
+  const { rows } = await pool.query(
+    `SELECT stock_key, SUM(qty)::int AS units, COALESCE(SUM(value_lei),0)::numeric AS revenue
+     FROM sales_log WHERE sold_at >= date_trunc('month', now())
+     GROUP BY stock_key ORDER BY units DESC LIMIT $1`, [limit]
+  );
+  return rows.map(r => ({ key: r.stock_key, units: r.units, revenue: +r.revenue }));
+}
+
+// Canale luna curenta
+async function getChannelStatsMonth() {
+  const { rows } = await pool.query(
+    `SELECT channel, COUNT(DISTINCT order_id)::int AS orders, COALESCE(SUM(value_lei),0)::numeric AS revenue
+     FROM sales_log WHERE sold_at >= date_trunc('month', now())
+     GROUP BY channel ORDER BY revenue DESC`
+  );
+  return rows.map(r => ({ channel: r.channel, orders: r.orders, revenue: +r.revenue }));
+}
+
 module.exports = {
   pool, init, SEED_STOCK, SKU_MAP,
   getStock, adjustStock, isProcessed, markProcessed,
   isRestocked, markRestocked, getLearned, saveLearned,
   addJournal, getJournal, logSale, getVelocity, getMeta, setMeta,
-  getSalesSummary, getTopProducts, getChannelStats, getDailyOrders, getAvgPrices
+  getSalesSummary, getTopProducts, getChannelStats, getDailyOrders, getAvgPrices,
+  getMonthSummary, getDailyThisMonth, getTopProductsMonth, getChannelStatsMonth
 };
