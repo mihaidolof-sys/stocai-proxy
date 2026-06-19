@@ -1,6 +1,7 @@
 // server.js - StocAI backend complet (24/7)
 const express = require('express');
 const fetch = require('node-fetch');
+const path = require('path');
 const db = require('./db');
 const logic = require('./logic');
 
@@ -11,6 +12,11 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
+});
+
+// Dashboard la radacina
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public-dashboard.html'));
 });
 
 const ES_TOKEN = process.env.ES_TOKEN;
