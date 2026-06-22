@@ -1,7 +1,6 @@
-// server.js - StocAI FINAL
-// Stocul fizic de baze: citit initial din Easy Sales products API, apoi scazut din comenzi
-// Business: din comenzi (venituri, canale, top produse)
-// Predictii: din istoricul de vanzari
+// server.js - StocAI FINAL CORECT
+// Stoc: gestionat de NOI (seed initial + NIR-uri). Easy Sales = doar sursa de comenzi.
+// Cand intra o comanda noua -> identificam produsul (SKU/cuvinte cheie/AI) -> SCADEM din stocul nostru.
 const express = require('express');
 const fetch = require('node-fetch');
 const path = require('path');
@@ -25,21 +24,7 @@ const H = () => ({ 'Authorization': `Bearer ${ES_TOKEN}`, 'Accept': 'application
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public-dashboard.html')));
 app.get('/test', (req, res) => res.json({ status: 'ok', ai: !!ANTHROPIC_KEY, es: !!ES_TOKEN, db: !!process.env.DATABASE_URL }));
 
-// ============ EASY SALES API ============
-async function fetchProducts() {
-  let all = [];
-  for (let p = 1; p <= 30; p++) {
-    const r = await fetch(`${ES_BASE}/products?per_page=100&page=${p}`, { headers: H() });
-    if (!r.ok) break;
-    const d = await r.json();
-    const list = d.data || (Array.isArray(d) ? d : []);
-    if (!list.length) break;
-    all = all.concat(list);
-    if (list.length < 100) break;
-  }
-  return all;
-}
-
+// ============ EASY SALES - DOAR COMENZI ============
 async function fetchOrders(maxPages) {
   let all = [], prevId = null;
   for (let p = 1; p <= (maxPages||120); p++) {
@@ -56,117 +41,94 @@ async function fetchOrders(maxPages) {
   return all;
 }
 
-// ============ CALCUL STOC FIZIC DIN PRODUSE EASY SALES ============
-// Citeste produsele din ES si calculeaza stocul fizic de baze
-// Ex: "Set 2x200+1x160" cu stoc 285 = 570 bariere fizice 200cm + 285 bariere 160cm
-async function computePhysicalStock() {
-  const products = await fetchProducts();
-  console.log(`Fetched ${products.length} products`);
-  
-  const physical = {};
-  // Initializeaza categoriile cunoscute
-  for (const key of Object.keys(db.SEED_STOCK)) {
-    physical[key] = { label: db.SEED_STOCK[key].label, qty: 0, color: db.SEED_STOCK[key].color };
-  }
-  
-  for (const p of products) {
-    const sku = p.sku || '';
-    const name = p.name || '';
-    const stock = parseInt(p.stock) || 0;
-    if (stock <= 0) continue;
-    
-    // Ce reguli de compozitie are acest produs?
-    let rules = db.SKU_MAP[sku];
-    if (!rules) {
-      const learned = await db.getLearned(sku);
-      if (learned) rules = learned;
-    }
-    if (!rules) {
-      const kw = logic.inferFromName(name);
-      if (kw.length) rules = kw;
-    }
-    
-    if (rules && rules.length > 0) {
-      // Produs compus sau mapat: inmulteste stocul ES cu multiplicatorul
-      for (const rule of rules) {
-        if (!physical[rule.key]) {
-          physical[rule.key] = { label: rule.key, qty: 0, color: '#64748b' };
-        }
-        physical[rule.key].qty += stock * rule.qty;
-      }
-    } else if (stock > 0) {
-      // Produs simplu nemapat: creeaza categorie proprie
-      const autoKey = 'p_' + sku.replace(/[^a-zA-Z0-9]/g, '_');
-      if (!physical[autoKey]) {
-        physical[autoKey] = { label: name.substring(0, 50), qty: 0, color: '#64748b' };
-      }
-      physical[autoKey].qty += stock;
-    }
-  }
-  
-  return physical;
-}
+const RECENT_WINDOW_DAYS = 2; // doar comenzile din ultimele 2 zile se scad automat din stoc
 
 // ============ SINCRONIZARE ============
 async function sync() {
   if (!ES_TOKEN) { console.log('No ES_TOKEN'); return; }
-  
-  // 1. STOC: calculeaza din produse Easy Sales
-  try {
-    const physical = await computePhysicalStock();
-    for (const [key, s] of Object.entries(physical)) {
-      const exists = await db.pool.query('SELECT 1 FROM stock WHERE key=$1', [key]);
-      if (exists.rows.length) {
-        await db.pool.query('UPDATE stock SET qty=$1, label=$2, color=$3 WHERE key=$4', [s.qty, s.label, s.color, key]);
-      } else {
-        await db.pool.query('INSERT INTO stock(key,label,qty,color) VALUES($1,$2,$3,$4)', [key, s.label, s.qty, s.color]);
-      }
-    }
-    await db.setMeta('last_stock_sync', new Date().toISOString());
-    console.log('Stock synced from Easy Sales');
-  } catch(e) { console.error('Stock sync error:', e.message); }
-  
-  // 2. COMENZI: pentru business metrics
   try {
     const orders = await fetchOrders();
     console.log(`Fetched ${orders.length} orders`);
-    
+    const firstRun = !(await db.getMeta('initialized'));
+    const now = Date.now();
+    let autoProcessed = 0;
+
     for (const o of orders) {
       const id = String(o.order_display_id || o.id || '');
       if (!id) continue;
       const kind = logic.classify(o.status);
       if (kind === 'ignore') continue;
-      
+
       const rawDate = o.order_date || o.created_at || '';
       const t = Date.parse(rawDate);
       if (isNaN(t)) continue;
-      
+
       const channel = o.marketplace || 'necunoscut';
       const orderValue = parseFloat(o.value || 0) || 0;
       const products = logic.extractProducts(o);
       if (!products.length) continue;
-      
+
+      // Rezolva deducerile pentru fiecare produs din comanda
+      const deductions = {};
+      let review = false;
+      for (const p of products) {
+        const { rules, review: r } = await logic.resolveProduct(p);
+        if (r) review = true;
+        for (const rule of rules) deductions[rule.key] = (deductions[rule.key] || 0) + rule.qty * p.qty;
+      }
+      const totalUnits = Object.values(deductions).reduce((a,b)=>a+b, 0) || 1;
+
       if (kind === 'sale') {
-        const deductions = {};
-        for (const p of products) {
-          const { rules } = await logic.resolveProduct(p);
-          for (const rule of rules) {
-            deductions[rule.key] = (deductions[rule.key] || 0) + rule.qty * p.qty;
+        // Logheaza pentru business/predictii (idempotent, doar o data per order+produs)
+        if (!(await db.isProcessed(id))) {
+          for (const [k, v] of Object.entries(deductions)) {
+            const valShare = +(orderValue * v / totalUnits).toFixed(2);
+            await db.logSale(id, new Date(t).toISOString(), k, v, channel, valShare);
           }
         }
-        const totalUnits = Object.values(deductions).reduce((a,b)=>a+b, 0) || 1;
-        for (const [k, v] of Object.entries(deductions)) {
-          const valShare = +(orderValue * v / totalUnits).toFixed(2);
-          await db.logSale(id, new Date(t).toISOString(), k, v, channel, valShare);
+
+        if (await db.isProcessed(id)) continue;
+
+        const isRecent = (now - t) <= RECENT_WINDOW_DAYS * 86400000;
+
+        if (firstRun || !isRecent) {
+          // Comanda veche - stocul initial deja o reflecta. Marcam procesata FARA sa scadem.
+          await db.markProcessed(id, 'sale_baseline', null);
+          continue;
         }
+
+        if (review) {
+          await db.markProcessed(id, 'review', { products, deductions });
+          continue; // necesita verificare manuala, nu scade automat
+        }
+
+        // SCADE din stocul nostru
+        for (const [k, v] of Object.entries(deductions)) {
+          await db.adjustStock(k, -v);
+          const st = db.SEED_STOCK[k] || { label: k };
+          await db.addJournal('out', `CMD ${id} → ${st.label}`, -v);
+        }
+        await db.markProcessed(id, 'sale', deductions);
+        autoProcessed++;
+
       } else if (kind === 'return') {
+        if (firstRun) {
+          await db.markProcessed(id, 'return_old', null);
+          continue;
+        }
         if (!(await db.isProcessed(id))) {
-          await db.markProcessed(id, 'return_pending', { products, value: parseFloat(o.value||0)||0 });
+          await db.markProcessed(id, 'return_pending', { products, deductions, value: orderValue });
         }
       }
     }
+
+    if (firstRun) {
+      await db.setMeta('initialized', '1');
+      console.log('First run: comenzi existente marcate ca baseline (stocul initial le reflecta deja)');
+    }
     await db.setMeta('last_sync', new Date().toISOString());
-  } catch(e) { console.error('Orders sync error:', e.message); }
+    if (autoProcessed) console.log(`${autoProcessed} comenzi noi procesate, stoc scazut`);
+  } catch(e) { console.error('Sync error:', e.message); }
 }
 
 // ============ API DASHBOARD ============
@@ -182,6 +144,18 @@ app.get('/state', async (req, res) => {
       return { ...s, sold30, perDay: +perDay.toFixed(2), daysLeft };
     });
     res.json({ stock: stockWithPred, lastSync });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// NIR / Ajustare manuala stoc (singura cale de a modifica stocul, in afara de vanzari)
+app.post('/adjust', async (req, res) => {
+  try {
+    const { key, delta, note } = req.body;
+    if (!key || delta === undefined) return res.status(400).json({ error: 'key si delta sunt obligatorii' });
+    await db.adjustStock(key, parseInt(delta));
+    const st = db.SEED_STOCK[key] || { label: key };
+    await db.addJournal(parseInt(delta) >= 0 ? 'nir' : 'corectie', `${note || 'NIR'} → ${st.label}`, parseInt(delta));
+    res.json({ ok: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -212,15 +186,43 @@ app.get('/returns', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/review', async (req, res) => {
+  try {
+    const { rows } = await db.pool.query(`SELECT order_id, detail, processed_at FROM processed_orders WHERE kind='review' ORDER BY processed_at DESC LIMIT 50`);
+    res.json({ review: rows });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/return-decision', async (req, res) => {
   try {
-    const { orderId, decision } = req.body;
-    const { rows } = await db.pool.query('SELECT detail FROM processed_orders WHERE order_id=$1', [String(orderId)]);
+    const { orderId, decision } = req.body; // 'restock' | 'olx' | 'scrap'
+    const oid = String(orderId);
+    const { rows } = await db.pool.query('SELECT detail FROM processed_orders WHERE order_id=$1', [oid]);
     if (!rows.length) return res.status(404).json({ error: 'not found' });
-    const value = parseFloat((rows[0].detail||{}).value || 0) || 0;
-    await db.addJournal(decision, `RETUR ${decision} ${orderId}`, 0);
-    await db.pool.query(`INSERT INTO return_dispositions(order_id,decision,value_lei,detail) VALUES($1,$2,$3,$4) ON CONFLICT(order_id) DO UPDATE SET decision=$2,value_lei=$3,decided_at=now()`, [String(orderId), decision, value, JSON.stringify(rows[0].detail)]);
-    await db.pool.query(`UPDATE processed_orders SET kind='return_done' WHERE order_id=$1`, [String(orderId)]);
+    const detail = rows[0].detail || {};
+    const deductions = detail.deductions || {};
+    const value = parseFloat(detail.value || 0) || 0;
+
+    if (decision === 'restock') {
+      for (const [k, v] of Object.entries(deductions)) {
+        await db.adjustStock(k, v);
+        const st = db.SEED_STOCK[k] || { label: k };
+        await db.addJournal('in', `RETUR→STOC ${oid} → ${st.label}`, v);
+      }
+    } else if (decision === 'olx') {
+      await db.addJournal('olx', `RETUR→OLX ${oid}`, 0);
+    } else if (decision === 'scrap') {
+      await db.addJournal('scrap', `RETUR→CASARE ${oid} (-${value.toFixed(2)} lei)`, 0);
+    } else {
+      return res.status(400).json({ error: 'decizie invalida' });
+    }
+
+    await db.pool.query(
+      `INSERT INTO return_dispositions(order_id,decision,value_lei,detail) VALUES($1,$2,$3,$4)
+       ON CONFLICT(order_id) DO UPDATE SET decision=$2,value_lei=$3,decided_at=now()`,
+      [oid, decision, value, JSON.stringify(detail)]
+    );
+    await db.pool.query(`UPDATE processed_orders SET kind='return_done' WHERE order_id=$1`, [oid]);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -234,18 +236,25 @@ app.get('/reports', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Curatare + resync complet
+// Curatare completa: reseteaza stocul la baseline, sterge istoricul, resincronizeaza
 app.post('/clean', async (req, res) => {
   try {
     await db.pool.query('DELETE FROM sales_log');
     await db.pool.query('DELETE FROM processed_orders');
     await db.pool.query('DELETE FROM journal');
+    await db.pool.query('DELETE FROM return_dispositions');
     await db.pool.query('DROP INDEX IF EXISTS sales_log_uniq');
     await db.pool.query('CREATE UNIQUE INDEX sales_log_uniq ON sales_log(order_id, stock_key)');
+    // Reseteaza stocul la valorile din SEED_STOCK
+    for (const [key, s] of Object.entries(db.SEED_STOCK)) {
+      const exists = await db.pool.query('SELECT 1 FROM stock WHERE key=$1', [key]);
+      if (exists.rows.length) await db.pool.query('UPDATE stock SET qty=$1 WHERE key=$2', [s.qty, key]);
+      else await db.pool.query('INSERT INTO stock(key,label,qty,color) VALUES($1,$2,$3,$4)', [key, s.label, s.qty, s.color]);
+    }
+    await db.setMeta('initialized', '');
     await sync();
     const check = await db.pool.query(`SELECT COUNT(DISTINCT order_id)::int AS orders, COALESCE(SUM(value_lei),0)::numeric AS total FROM sales_log WHERE sold_at >= date_trunc('month', now())`);
-    const stock = await db.getStock();
-    res.json({ ok:true, juneOrders:check.rows[0].orders, juneRevenue:+check.rows[0].total, stockItems:stock.length });
+    res.json({ ok:true, juneOrders:check.rows[0].orders, juneRevenue:+check.rows[0].total });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -263,16 +272,21 @@ app.post('/ai', async (req, res) => {
 
 app.get('/inspect', async (req, res) => {
   try {
-    const products = await fetchProducts();
-    const physical = await computePhysicalStock();
-    const topPhysical = Object.entries(physical).sort((a,b)=>b[1].qty-a[1].qty).slice(0,15).map(([k,v])=>({key:k, label:v.label, qty:v.qty}));
-    res.json({ totalESProducts: products.length, withStock: products.filter(p=>(parseInt(p.stock)||0)>0).length, physicalCategories: Object.keys(physical).length, topPhysicalStock: topPhysical });
+    const orders = await fetchOrders(3);
+    const stock = await db.getStock();
+    const statuses = {}, channels = {};
+    orders.forEach(o => {
+      statuses[o.status||'?'] = (statuses[o.status||'?']||0)+1;
+      const ch = o.marketplace || '?';
+      channels[ch] = (channels[ch]||0)+1;
+    });
+    res.json({ ordersLoaded: orders.length, statuses, channels, stockItems: stock.length, sampleOrder: orders[0] ? { id: orders[0].order_display_id, status: orders[0].status, marketplace: orders[0].marketplace, value: orders[0].value } : null });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 const PORT = process.env.PORT || 3000;
 db.init().then(() => {
-  app.listen(PORT, () => console.log('StocAI FINAL pe port', PORT));
+  app.listen(PORT, () => console.log('StocAI pe port', PORT));
   sync();
   setInterval(sync, 5 * 60 * 1000);
 }).catch(e => console.error('DB init failed', e));
