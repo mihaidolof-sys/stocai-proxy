@@ -343,12 +343,13 @@ async function getAvgPrices() {
   return map;
 }
 
-// Sumar pe LUNA CALENDARISTICA curenta (de la 1 ale lunii)
+// Sumar pe LUNA CALENDARISTICA curenta - bulletproof
 async function getMonthSummary() {
   const { rows } = await pool.query(
-    `SELECT COUNT(DISTINCT order_id)::int AS orders, COALESCE(SUM(value_lei),0)::numeric AS revenue
-     FROM (SELECT DISTINCT order_id, value_lei FROM sales_log
-           WHERE sold_at >= date_trunc('month', now())) t`
+    `SELECT COUNT(DISTINCT order_id)::int AS orders,
+            COALESCE(SUM(value_lei),0)::numeric AS revenue
+     FROM sales_log
+     WHERE sold_at >= date_trunc('month', now())`
   );
   const orders = rows[0].orders, revenue = +rows[0].revenue;
   return { orders, revenue, avgOrder: orders ? +(revenue/orders).toFixed(2) : 0 };
