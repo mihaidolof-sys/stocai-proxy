@@ -178,6 +178,13 @@ async function init() {
       descr TEXT,
       qty INTEGER
     );
+    CREATE TABLE IF NOT EXISTS stock_adjustments (
+      id SERIAL PRIMARY KEY,
+      stock_key TEXT NOT NULL,
+      delta INTEGER NOT NULL,
+      note TEXT,
+      ts TIMESTAMPTZ DEFAULT now()
+    );
     CREATE TABLE IF NOT EXISTS meta (
       k TEXT PRIMARY KEY,
       v TEXT
@@ -398,11 +405,26 @@ async function getChannelStatsMonth() {
   return rows.map(r => ({ channel: r.channel, orders: r.orders, revenue: +r.revenue }));
 }
 
+// Ajustari NIR (se adauga PESTE stocul din Easy Sales)
+async function addAdjustment(stockKey, delta, note) {
+  await pool.query('INSERT INTO stock_adjustments(stock_key, delta, note) VALUES($1,$2,$3)', [stockKey, delta, note || 'NIR']);
+  await addJournal(delta >= 0 ? 'nir' : 'corectie', `${note || 'NIR'} → ${stockKey}`, delta);
+}
+
+// Total ajustari per categorie
+async function getAdjustments() {
+  const { rows } = await pool.query('SELECT stock_key, COALESCE(SUM(delta),0)::int AS total FROM stock_adjustments GROUP BY stock_key');
+  const map = {};
+  rows.forEach(r => map[r.stock_key] = r.total);
+  return map;
+}
+
 module.exports = {
   pool, init, SEED_STOCK, SKU_MAP,
   getStock, adjustStock, isProcessed, markProcessed,
   isRestocked, markRestocked, getLearned, saveLearned,
   addJournal, getJournal, logSale, getVelocity, getMeta, setMeta,
   getSalesSummary, getTopProducts, getChannelStats, getDailyOrders, getAvgPrices,
-  getMonthSummary, getDailyThisMonth, getTopProductsMonth, getChannelStatsMonth
+  getMonthSummary, getDailyThisMonth, getTopProductsMonth, getChannelStatsMonth,
+  addAdjustment, getAdjustments
 };
