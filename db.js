@@ -23,6 +23,10 @@ const SEED_STOCK = {
   sw_befit: { label: 'Smartwatch BeFIT', qty: 7, color: '#14b8a6' },
   masa_gradina_set: { label: 'Masă Grădină / Set Mobilier', qty: 20, color: '#65a30d' },
   microfon_lav: { label: 'Microfoane Lavalieră', qty: 10, color: '#e879f9' },
+  tarc_180_simplu: { label: 'Țarc 150x180cm Simplu', qty: 0, color: '#fbbf24' },
+  tarc_180_complet: { label: 'Țarc 180x150cm cu Covoraș+Bile', qty: 0, color: '#f59e0b' },
+  tarc_120_simplu: { label: 'Țarc 120cm Simplu', qty: 0, color: '#d97706' },
+  tarc_120_complet: { label: 'Țarc 120cm cu Covoraș+Bile', qty: 0, color: '#b45309' },
   p_X5: { label: 'Casti wireless audio Rohs® Bluetooth 5.0,', qty: 1, color: '#64748b' },
   p_TK_K802: { label: 'Monitor fetal Doppler pentru gravide, Dete', qty: 1, color: '#64748b' },
   p_LGHY_02442: { label: 'Aparat curatare cu ultrasunete, Polipropil', qty: 20, color: '#64748b' },
@@ -38,7 +42,6 @@ const SEED_STOCK = {
   p_safe10: { label: 'Scaun metalic de gradina pliant Rohs Home,', qty: 80, color: '#64748b' },
   p_9789739016568: { label: 'Ceas smartwatch si bratara fitness,RoHS®,', qty: 58, color: '#64748b' },
   p_safe345: { label: 'Scaun de masa HappyKID 4 pozitii inclinare', qty: 3, color: '#64748b' },
-  p_safe567: { label: 'Tarc de joaca pentru copii, HappyKID, plas', qty: 120, color: '#64748b' },
   p_safe490: { label: 'Ceas smartwatch si bratara fitness, RoHS®,', qty: 47, color: '#64748b' },
   p_safe545: { label: 'Router Wireless pentru cartela SIM 4G, 3in', qty: 231, color: '#64748b' },
   p_safe3411: { label: 'Camera auto de bord DVR duala RoHS® Safety', qty: 1, color: '#64748b' },
@@ -63,7 +66,6 @@ const SEED_STOCK = {
   p_Rohs_123211: { label: 'Birou Calculator 120x60x74cm, Design Moder', qty: 2, color: '#64748b' },
   p_rohs12332: { label: 'Birou pentru calculator cu raft HomeOFFICE', qty: 89, color: '#64748b' },
   p_ROHS1233: { label: 'Birou pentru calculator cu raft HomeOFFICE', qty: 54, color: '#64748b' },
-  p_tarc2: { label: 'Tarc de joaca Happykid cu bile,covoras si', qty: 106, color: '#64748b' },
   p_troler1: { label: 'Troler copii 2 în 1 cu rucsac inclus, mode', qty: 100, color: '#64748b' },
 };
 
@@ -115,7 +117,7 @@ const SKU_MAP = {
   'safe10': [{ key: 'p_safe10', qty: 1 }],
   '9789739016568': [{ key: 'p_9789739016568', qty: 1 }],
   'safe345': [{ key: 'p_safe345', qty: 1 }],
-  'safe567': [{ key: 'p_safe567', qty: 1 }],
+  'safe567': [{ key: 'tarc_180_simplu', qty: 1 }],
   'safe490': [{ key: 'p_safe490', qty: 1 }],
   'safe545': [{ key: 'p_safe545', qty: 1 }],
   'safe3411': [{ key: 'p_safe3411', qty: 1 }],
@@ -140,7 +142,9 @@ const SKU_MAP = {
   'Rohs-123211': [{ key: 'p_Rohs_123211', qty: 1 }],
   'rohs12332': [{ key: 'p_rohs12332', qty: 1 }],
   'ROHS1233': [{ key: 'p_ROHS1233', qty: 1 }],
-  'tarc2': [{ key: 'p_tarc2', qty: 1 }],
+  'tarc2': [{ key: 'tarc_180_complet', qty: 1 }],
+  'tarc3': [{ key: 'tarc_120_simplu', qty: 1 }],
+  'tarc33': [{ key: 'tarc_120_complet', qty: 1 }],
   'troler1': [{ key: 'p_troler1', qty: 1 }],
 };
 
