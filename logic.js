@@ -53,9 +53,17 @@ function inferFromName(name) {
     else if (name.includes('alb')) r.push({ key: 'birou_alb', qty: 1 });
   }
   
-  // TARC DE JOACA
+  // TARC DE JOACA - 4 tipuri separate
   if (r.length === 0 && (name.includes('tarc') || name.includes('țarc')) && name.includes('joaca')) {
-    r.push({ key: 'p_safe567', qty: 1 });  // default tarc
+    const hasBile = name.includes('bile') || name.includes('covoras') || name.includes('covoraș') || name.includes('saltelut');
+    const is120 = name.includes('120');
+    const is180 = name.includes('180') || name.includes('150');
+    if (is120 && hasBile) r.push({ key: 'tarc_120_complet', qty: 1 });
+    else if (is120) r.push({ key: 'tarc_120_simplu', qty: 1 });
+    else if (is180 && hasBile) r.push({ key: 'tarc_180_complet', qty: 1 });
+    else if (is180) r.push({ key: 'tarc_180_simplu', qty: 1 });
+    else if (hasBile) r.push({ key: 'tarc_180_complet', qty: 1 });
+    else r.push({ key: 'tarc_180_simplu', qty: 1 });
   }
   
   // MICROFON LAVALIERA
