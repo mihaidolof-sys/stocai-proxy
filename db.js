@@ -8,7 +8,16 @@ const pool = new Pool({
 
 // Stocul fizic initial de baze (calculat din export-ul Easy Sales)
 const SEED_STOCK = {
-  leagane_electrice: { label: 'Leagăn Electric Bebeluși', qty: 210, color: '#f472b6' },
+  bariere_200: { label: 'Bariere 200cm', qty: 0, color: '#38bdf8' },
+  bariere_160: { label: 'Bariere 160cm', qty: 0, color: '#4ade80' },
+  bariere_180: { label: 'Bariere 180cm', qty: 0, color: '#a78bfa' },
+  bariere_140: { label: 'Bariere 140cm', qty: 0, color: '#fb923c' },
+  scaune_gaming_negru_rosu: { label: 'Scaun Gaming Negru/Roșu', qty: 0, color: '#f472b6' },
+  scaune_gaming_negru_albastru: { label: 'Scaun Gaming Negru/Albastru', qty: 0, color: '#34d399' },
+  scaune_ergonomic_negru: { label: 'Scaun Birou Negru Ergonomic', qty: 0, color: '#94a3b8' },
+  scaun_ergonomic_negru_inchis: { label: 'Scaun Ergonomic Negru Închis', qty: 0, color: '#475569' },
+  scaune_ergonomic_gri: { label: 'Scaun Ergonomic Gri', qty: 0, color: '#64748b' },
+  leagane_electrice: { label: 'Leagăn Electric Bebeluși', qty: 0, color: '#f472b6' },
   birou_maro: { label: 'Birou Scandinav Maro', qty: 59, color: '#a16207' },
   baby_monitor: { label: 'Baby Monitor Video', qty: 24, color: '#38bdf8' },
   sw_befit: { label: 'Smartwatch BeFIT', qty: 7, color: '#14b8a6' },
@@ -75,7 +84,7 @@ const SKU_MAP = {
   safe67888: [{ key: 'scaune_gaming_negru_albastru', qty: 1 }],
   ExtremeRXBlue: [{ key: 'scaune_gaming_negru_albastru', qty: 1 }],
   safe334: [{ key: 'scaune_ergonomic_negru', qty: 1 }],
-  SC221: [{ key: 'scaune_ergonomic_negru', qty: 1 }],
+  SC221: [{ key: 'scaun_ergonomic_negru_inchis', qty: 1 }],
   scaun11: [{ key: 'scaune_ergonomic_negru', qty: 1 }],
   Sc111: [{ key: 'scaune_ergonomic_gri', qty: 1 }],
   'leagan-1': [{ key: 'leagane_electrice', qty: 1 }],
