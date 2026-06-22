@@ -190,6 +190,8 @@ async function init() {
   // Migrari sigure (daca tabelul exista deja fara coloanele noi)
   await pool.query(`ALTER TABLE sales_log ADD COLUMN IF NOT EXISTS channel TEXT;`).catch(()=>{});
   await pool.query(`ALTER TABLE sales_log ADD COLUMN IF NOT EXISTS value_lei NUMERIC DEFAULT 0;`).catch(()=>{});
+  // Index unic: previne duplicate la nivel de DB
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS sales_log_uniq ON sales_log(order_id, stock_key);`).catch(()=>{});
 
   // Seed stock daca tabelul e gol
   const { rows } = await pool.query('SELECT COUNT(*)::int AS n FROM stock');
@@ -253,6 +255,11 @@ async function getJournal(limit = 50) {
 }
 
 async function logSale(orderId, soldAt, key, qty, channel, valueLei) {
+  // Previne duplicate: daca aceasta combinatie order+stock_key exista deja, nu mai adauga
+  const { rows } = await pool.query(
+    'SELECT 1 FROM sales_log WHERE order_id=$1 AND stock_key=$2', [String(orderId), key]
+  );
+  if (rows.length > 0) return; // deja logat
   await pool.query(
     'INSERT INTO sales_log(order_id,sold_at,stock_key,qty,channel,value_lei) VALUES($1,$2,$3,$4,$5,$6)',
     [String(orderId), soldAt, key, qty, channel || 'necunoscut', valueLei || 0]
