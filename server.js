@@ -1,4 +1,7 @@
-// server.js - StocAI backend complet (24/7)
+// server.js - StocAI FINAL
+// Stocul fizic de baze: citit initial din Easy Sales products API, apoi scazut din comenzi
+// Business: din comenzi (venituri, canale, top produse)
+// Predictii: din istoricul de vanzari
 const express = require('express');
 const fetch = require('node-fetch');
 const path = require('path');
@@ -14,368 +17,174 @@ app.use((req, res, next) => {
   next();
 });
 
-// Dashboard la radacina
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public-dashboard.html'));
-});
-
 const ES_TOKEN = process.env.ES_TOKEN;
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const ES_BASE = 'https://easy-sales.com/api/v2';
-const H = () => ({ 'Authorization': `Bearer ${ES_TOKEN}`, 'Accept': 'application/json', 'Content-Type': 'application/json' });
+const H = () => ({ 'Authorization': `Bearer ${ES_TOKEN}`, 'Accept': 'application/json' });
 
-// Detecteaza canalul de vanzare din comanda (mapare id-uri marketplace cunoscute)
-const MARKETPLACE_NAMES = {
-  '1': 'eMAG', '40': 'eMAG', '83': 'Trendyol', '36217': 'eMAG',
-};
-function detectChannel(o) {
-  // Easy Sales foloseste campul 'marketplace' (TrendyolRO, Emag, PepitaRO, etc.)
-  if (o.marketplace && typeof o.marketplace === 'string') return o.marketplace;
-  // Fallback-uri
-  const direct = o.marketplace_name || o.channel_name || o.sales_channel || o.account_name;
-  if (direct && typeof direct === 'string') return direct;
-  if (o.website && typeof o.website === 'string') return o.website;
-  const mid = o.marketplace_id != null ? String(o.marketplace_id) : null;
-  if (mid) return 'Marketplace ' + mid;
-  return 'necunoscut';
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public-dashboard.html')));
+app.get('/test', (req, res) => res.json({ status: 'ok', ai: !!ANTHROPIC_KEY, es: !!ES_TOKEN, db: !!process.env.DATABASE_URL }));
+
+// ============ EASY SALES API ============
+async function fetchProducts() {
+  let all = [];
+  for (let p = 1; p <= 30; p++) {
+    const r = await fetch(`${ES_BASE}/products?per_page=100&page=${p}`, { headers: H() });
+    if (!r.ok) break;
+    const d = await r.json();
+    const list = d.data || (Array.isArray(d) ? d : []);
+    if (!list.length) break;
+    all = all.concat(list);
+    if (list.length < 100) break;
+  }
+  return all;
 }
 
-// ---- Preia comenzi din Easy Sales (toate paginile, pana se termina) ----
-async function fetchOrders(maxPages = 120) {
-  let all = [];
-  let prevFirstId = null;
-  for (let p = 1; p <= maxPages; p++) {
+async function fetchOrders(maxPages) {
+  let all = [], prevId = null;
+  for (let p = 1; p <= (maxPages||120); p++) {
     const r = await fetch(`${ES_BASE}/orders?page=${p}`, { headers: H() });
     if (!r.ok) break;
     const d = await r.json();
     const list = d.data || d.orders || (Array.isArray(d) ? d : []);
-    if (!list.length) break;  // pagina goala = ultima
-    // protectie anti-bucla: daca pagina returneaza aceleasi date (API ignora ?page)
-    const firstId = String(list[0].id || list[0].order_display_id || '');
-    if (firstId && firstId === prevFirstId) break;
-    prevFirstId = firstId;
+    if (!list.length) break;
+    const fid = String(list[0].id||'');
+    if (fid && fid === prevId) break;
+    prevId = fid;
     all = all.concat(list);
   }
   return all;
 }
 
-// ---- Sincronizare: scade comenzi noi, populeaza sales_log pentru predictie ----
-async function sync() {
-  if (!ES_TOKEN) { console.log('No ES_TOKEN'); return; }
-  let orders;
-  try { orders = await fetchOrders(); }
-  catch (e) { console.log('fetch err', e.message); return; }
-
-  const firstRun = !(await db.getMeta('initialized'));
-  const now = Date.now();
-  let processed = 0;
-
-  for (const o of orders) {
-    const id = String(o.order_display_id || o.id || o.order_id);
-    if (!id) continue;
-    const kind = logic.classify(o.status);
-    if (kind === 'ignore') continue;
-
-    const products = logic.extractProducts(o);
-    if (!products.length) continue;
-
-    const rawDate = o.order_date || o.created_at || o.date || '';
-    const t = Date.parse(rawDate);
-
-    // Rezolva deducerile
-    const deductions = {};
-    let review = false;
-    for (const p of products) {
-      const { rules, review: r } = await logic.resolveProduct(p);
-      if (r) review = true;
-      for (const rule of rules) deductions[rule.key] = (deductions[rule.key] || 0) + rule.qty * p.qty;
+// ============ CALCUL STOC FIZIC DIN PRODUSE EASY SALES ============
+// Citeste produsele din ES si calculeaza stocul fizic de baze
+// Ex: "Set 2x200+1x160" cu stoc 285 = 570 bariere fizice 200cm + 285 bariere 160cm
+async function computePhysicalStock() {
+  const products = await fetchProducts();
+  console.log(`Fetched ${products.length} products`);
+  
+  const physical = {};
+  // Initializeaza categoriile cunoscute
+  for (const key of Object.keys(db.SEED_STOCK)) {
+    physical[key] = { label: db.SEED_STOCK[key].label, qty: 0, color: db.SEED_STOCK[key].color };
+  }
+  
+  for (const p of products) {
+    const sku = p.sku || '';
+    const name = p.name || '';
+    const stock = parseInt(p.stock) || 0;
+    if (stock <= 0) continue;
+    
+    // Ce reguli de compozitie are acest produs?
+    let rules = db.SKU_MAP[sku];
+    if (!rules) {
+      const learned = await db.getLearned(sku);
+      if (learned) rules = learned;
     }
-
-    if (kind === 'sale') {
-      // Identifica canalul (eMAG/Trendyol/magazin) - incearca mai multe campuri
-      const channel = detectChannel(o);
-      const orderValue = parseFloat(o.value || 0) || 0;  // 'value' fara TVA, cum arata Easy Sales
-      // valoarea pe unitate de stoc dedusa (proportional)
-      const totalUnits = Object.values(deductions).reduce((a, b) => a + b, 0) || 1;
-
-      // sales_log pentru predictie + business (toate vanzarile cu data valida, fara dubluri)
-      if (!isNaN(t) && !(await db.isProcessed(id))) {
-        for (const [k, v] of Object.entries(deductions)) {
-          const valShare = +(orderValue * (v / totalUnits)).toFixed(2);
-          await db.logSale(id, new Date(t).toISOString(), k, v, channel, valShare);
+    if (!rules) {
+      const kw = logic.inferFromName(name);
+      if (kw.length) rules = kw;
+    }
+    
+    if (rules && rules.length > 0) {
+      // Produs compus sau mapat: inmulteste stocul ES cu multiplicatorul
+      for (const rule of rules) {
+        if (!physical[rule.key]) {
+          physical[rule.key] = { label: rule.key, qty: 0, color: '#64748b' };
         }
+        physical[rule.key].qty += stock * rule.qty;
       }
-
-      if (await db.isProcessed(id)) continue;
-
-      if (firstRun) {
-        // Prima rulare: marcam tot ce exista ca deja contorizat (stocul actual le reflecta)
-        await db.markProcessed(id, 'sale_initial', deductions);
-        continue;
+    } else if (stock > 0) {
+      // Produs simplu nemapat: creeaza categorie proprie
+      const autoKey = 'p_' + sku.replace(/[^a-zA-Z0-9]/g, '_');
+      if (!physical[autoKey]) {
+        physical[autoKey] = { label: name.substring(0, 50), qty: 0, color: '#64748b' };
       }
-
-      if (review) {
-        await db.markProcessed(id, 'review', { products, deductions });
-        continue; // nu scadem automat - asteapta verificare
-      }
-
-      // Scade din stoc
-      for (const [k, v] of Object.entries(deductions)) {
-        await db.adjustStock(k, -v);
-        const st = db.SEED_STOCK[k];
-        await db.addJournal('out', `CMD ${id} → ${st ? st.label : k}`, -v);
-      }
-      await db.markProcessed(id, 'sale', deductions);
-      processed++;
-    } else if (kind === 'return') {
-      // Retururi/anulari DOAR de azi inainte (nu cele vechi din trecut)
-      // La prima rulare, marcam toate retururile vechi ca "ignorate" ca sa nu apara
-      if (firstRun) {
-        await db.markProcessed(id, 'return_old', null);
-        continue;
-      }
-      // Doar retururile noi (aparute dupa instalare) ajung in lista de decizie
-      if (!(await db.isProcessed(id))) {
-        const value = parseFloat(o.value || 0) || 0;
-        await db.markProcessed(id, 'return_pending', { products, deductions, value });
-      }
+      physical[autoKey].qty += stock;
     }
   }
-
-  if (firstRun) {
-    await db.setMeta('initialized', '1');
-    await db.setMeta('init_date', new Date().toISOString());
-    console.log('First run done - existing orders marked as counted');
-  }
-  await db.setMeta('last_sync', new Date().toISOString());
-  if (processed) console.log(`Sync: ${processed} comenzi noi scazute`);
+  
+  return physical;
 }
 
-// ============ API pentru aplicatie ============
-app.get('/test', (req, res) => res.json({ status: 'ok', ai: !!ANTHROPIC_KEY, es: !!ES_TOKEN, db: !!process.env.DATABASE_URL }));
+// ============ SINCRONIZARE ============
+async function sync() {
+  if (!ES_TOKEN) { console.log('No ES_TOKEN'); return; }
+  
+  // 1. STOC: calculeaza din produse Easy Sales
+  try {
+    const physical = await computePhysicalStock();
+    for (const [key, s] of Object.entries(physical)) {
+      const exists = await db.pool.query('SELECT 1 FROM stock WHERE key=$1', [key]);
+      if (exists.rows.length) {
+        await db.pool.query('UPDATE stock SET qty=$1, label=$2, color=$3 WHERE key=$4', [s.qty, s.label, s.color, key]);
+      } else {
+        await db.pool.query('INSERT INTO stock(key,label,qty,color) VALUES($1,$2,$3,$4)', [key, s.label, s.qty, s.color]);
+      }
+    }
+    await db.setMeta('last_stock_sync', new Date().toISOString());
+    console.log('Stock synced from Easy Sales');
+  } catch(e) { console.error('Stock sync error:', e.message); }
+  
+  // 2. COMENZI: pentru business metrics
+  try {
+    const orders = await fetchOrders();
+    console.log(`Fetched ${orders.length} orders`);
+    
+    for (const o of orders) {
+      const id = String(o.order_display_id || o.id || '');
+      if (!id) continue;
+      const kind = logic.classify(o.status);
+      if (kind === 'ignore') continue;
+      
+      const rawDate = o.order_date || o.created_at || '';
+      const t = Date.parse(rawDate);
+      if (isNaN(t)) continue;
+      
+      const channel = o.marketplace || 'necunoscut';
+      const orderValue = parseFloat(o.value || 0) || 0;
+      const products = logic.extractProducts(o);
+      if (!products.length) continue;
+      
+      if (kind === 'sale') {
+        const deductions = {};
+        for (const p of products) {
+          const { rules } = await logic.resolveProduct(p);
+          for (const rule of rules) {
+            deductions[rule.key] = (deductions[rule.key] || 0) + rule.qty * p.qty;
+          }
+        }
+        const totalUnits = Object.values(deductions).reduce((a,b)=>a+b, 0) || 1;
+        for (const [k, v] of Object.entries(deductions)) {
+          const valShare = +(orderValue * v / totalUnits).toFixed(2);
+          await db.logSale(id, new Date(t).toISOString(), k, v, channel, valShare);
+        }
+      } else if (kind === 'return') {
+        if (!(await db.isProcessed(id))) {
+          await db.markProcessed(id, 'return_pending', { products, value: parseFloat(o.value||0)||0 });
+        }
+      }
+    }
+    await db.setMeta('last_sync', new Date().toISOString());
+  } catch(e) { console.error('Orders sync error:', e.message); }
+}
 
-// Descopera endpoint-ul de produse din Easy Sales
-app.get('/discover-products', async (req, res) => {
-  const results = {};
-  const endpoints = ['/products', '/products?per_page=5', '/stock', '/stocks', '/inventory'];
-  for (const ep of endpoints) {
-    try {
-      const r = await fetch(`${ES_BASE}${ep}`, { headers: H() });
-      const txt = await r.text();
-      let data;
-      try { data = JSON.parse(txt); } catch(e) { data = txt.substring(0, 200); }
-      results[ep] = { status: r.status, sample: typeof data === 'object' ? JSON.stringify(data).substring(0, 500) : data };
-    } catch(e) { results[ep] = { error: e.message }; }
-  }
-  res.json(results);
-});
-
-// Situatia completa pentru dashboard
+// ============ API DASHBOARD ============
 app.get('/state', async (req, res) => {
   try {
     const stock = await db.getStock();
     const vel = await db.getVelocity(30);
-    const journal = await db.getJournal(40);
     const lastSync = await db.getMeta('last_sync');
-
     const stockWithPred = stock.map(s => {
       const sold30 = vel[s.key] || 0;
       const perDay = sold30 / 30;
       const daysLeft = perDay > 0 ? Math.floor(s.qty / perDay) : null;
       return { ...s, sold30, perDay: +perDay.toFixed(2), daysLeft };
     });
-
-    res.json({ stock: stockWithPred, journal, lastSync });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ stock: stockWithPred, lastSync });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// Retururi in asteptare (cu valoare)
-app.get('/returns', async (req, res) => {
-  try {
-    const { rows } = await db.pool.query(
-      `SELECT order_id, detail, processed_at FROM processed_orders WHERE kind='return_pending' ORDER BY processed_at DESC LIMIT 80`
-    );
-    res.json({ returns: rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Decizie retur: restock | olx | scrap
-app.post('/return-decision', async (req, res) => {
-  try {
-    const { orderId, decision } = req.body; // decision: 'restock' | 'olx' | 'scrap'
-    const oid = String(orderId);
-    const { rows } = await db.pool.query('SELECT detail FROM processed_orders WHERE order_id=$1', [oid]);
-    if (!rows.length) return res.status(404).json({ error: 'not found' });
-    const detail = rows[0].detail || {};
-    const deductions = detail.deductions || {};
-    const value = parseFloat(detail.value || 0) || 0;
-
-    if (decision === 'restock') {
-      // Produs bun -> inapoi in stoc
-      for (const [k, v] of Object.entries(deductions)) {
-        await db.adjustStock(k, v);
-        const st = db.SEED_STOCK[k];
-        await db.addJournal('in', `RETUR→STOC ${oid} → ${st ? st.label : k}`, v);
-      }
-    } else if (decision === 'olx') {
-      // Revanzare OLX - NU intra in stocul principal, doar evidenta
-      await db.addJournal('olx', `RETUR→OLX ${oid} (revanzare)`, 0);
-    } else if (decision === 'scrap') {
-      // Casare - pierdere cu valoare
-      await db.addJournal('scrap', `RETUR→CASARE ${oid} (-${value.toFixed(2)} lei)`, 0);
-    } else {
-      return res.status(400).json({ error: 'decizie invalida' });
-    }
-
-    await db.pool.query(
-      `INSERT INTO return_dispositions(order_id, decision, value_lei, detail)
-       VALUES($1,$2,$3,$4) ON CONFLICT (order_id) DO UPDATE SET decision=$2, value_lei=$3, decided_at=now()`,
-      [oid, decision, value, JSON.stringify(detail)]
-    );
-    await db.markRestocked(oid);
-    await db.pool.query(`UPDATE processed_orders SET kind='return_done' WHERE order_id=$1`, [oid]);
-    res.json({ ok: true, decision });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Raport casare + OLX
-app.get('/reports', async (req, res) => {
-  try {
-    const scrap = await db.pool.query(
-      `SELECT COUNT(*)::int AS n, COALESCE(SUM(value_lei),0)::numeric AS total FROM return_dispositions WHERE decision='scrap'`
-    );
-    const olx = await db.pool.query(
-      `SELECT COUNT(*)::int AS n, COALESCE(SUM(value_lei),0)::numeric AS total FROM return_dispositions WHERE decision='olx'`
-    );
-    const restocked = await db.pool.query(
-      `SELECT COUNT(*)::int AS n FROM return_dispositions WHERE decision='restock'`
-    );
-    const recentScrap = await db.pool.query(
-      `SELECT order_id, value_lei, detail, decided_at FROM return_dispositions WHERE decision='scrap' ORDER BY decided_at DESC LIMIT 20`
-    );
-    const recentOlx = await db.pool.query(
-      `SELECT order_id, detail, decided_at FROM return_dispositions WHERE decision='olx' ORDER BY decided_at DESC LIMIT 20`
-    );
-    res.json({
-      scrap: { count: scrap.rows[0].n, valueLei: +scrap.rows[0].total },
-      olx: { count: olx.rows[0].n, valueLei: +olx.rows[0].total },
-      restocked: { count: restocked.rows[0].n },
-      recentScrap: recentScrap.rows,
-      recentOlx: recentOlx.rows
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Comenzi de verificat (AI nesigur)
-app.get('/review', async (req, res) => {
-  try {
-    const { rows } = await db.pool.query(
-      `SELECT order_id, detail, processed_at FROM processed_orders WHERE kind='review' ORDER BY processed_at DESC LIMIT 50`
-    );
-    res.json({ review: rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Ajustare manuala stoc (NIR / corectie)
-app.post('/adjust', async (req, res) => {
-  try {
-    const { key, delta, note } = req.body;
-    await db.adjustStock(key, parseInt(delta));
-    const st = db.SEED_STOCK[key];
-    await db.addJournal(delta >= 0 ? 'in' : 'out', `${note || 'Ajustare manuală'} → ${st ? st.label : key}`, parseInt(delta));
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// AI chat proxy (cu context stoc)
-app.post('/ai', async (req, res) => {
-  try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify(req.body)
-    });
-    res.json(await r.json());
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// RESET COMPLET: re-seed stoc la valorile initiale + re-marcheaza tot ca baseline
-// (foloseste cand stocul s-a stricat din cauza unor scaderi gresite)
-app.post('/reset-all', async (req, res) => {
-  try {
-    // 1. Reseteaza stocul la valorile initiale din SEED_STOCK
-    for (const [key, s] of Object.entries(db.SEED_STOCK)) {
-      await db.pool.query('UPDATE stock SET qty=$1 WHERE key=$2', [s.qty, key]);
-    }
-    // 2. Goleste tot istoricul de procesare si jurnalul
-    await db.pool.query('DELETE FROM processed_orders');
-    await db.pool.query('DELETE FROM restocked_returns');
-    await db.pool.query('DELETE FROM return_dispositions');
-    await db.pool.query('DELETE FROM sales_log');
-    await db.pool.query('DELETE FROM journal');
-    // 3. Reseteaza flag-ul de initializare => urmatorul sync e "firstRun" (marcheaza tot ca baseline, fara scaderi)
-    await db.setMeta('initialized', '');
-    // 4. Resincronizare
-    await sync();
-    res.json({ ok: true, msg: 'Reset complet + resincronizare. Stocul e la baseline, doar comenzile noi de acum vor scadea.' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// CURATARE COMPLETA: sterge duplicate din sales_log si recalculeaza
-app.post('/clean', async (req, res) => {
-  try {
-    // 1. Sterge TOATE datele si reporneste curat
-    await db.pool.query('DELETE FROM sales_log');
-    await db.pool.query('DELETE FROM processed_orders');
-    await db.pool.query('DELETE FROM restocked_returns');
-    await db.pool.query('DELETE FROM return_dispositions');
-    await db.pool.query('DELETE FROM journal');
-    
-    // 2. Reseteaza stocul la baseline
-    for (const [key, s] of Object.entries(db.SEED_STOCK)) {
-      await db.pool.query('UPDATE stock SET qty=$1 WHERE key=$2', [s.qty, key]);
-    }
-    
-    // 3. Creaza index unic (daca nu exista) ACUM ca tabelul e gol
-    await db.pool.query('DROP INDEX IF EXISTS sales_log_uniq');
-    await db.pool.query('CREATE UNIQUE INDEX sales_log_uniq ON sales_log(order_id, stock_key)');
-    
-    // 4. Reseteaza flag initializare
-    await db.setMeta('initialized', '');
-    
-    // 5. Resincronizeaza - va rula ca firstRun
-    await sync();
-    
-    // 6. Verifica rezultatul
-    const check = await db.pool.query('SELECT COUNT(*)::int AS rows, COUNT(DISTINCT order_id)::int AS orders, COALESCE(SUM(value_lei),0)::numeric AS total FROM sales_log');
-    
-    res.json({ 
-      ok: true, 
-      rows: check.rows[0].rows,
-      uniqueOrders: check.rows[0].orders,
-      totalValue: +check.rows[0].total,
-      msg: 'Curățare completă. Verifică cifrele.'
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Forteaza sync manual
-app.post('/sync', async (req, res) => { await sync(); res.json({ ok: true }); });
-
-// RESET sales_log si re-sincronizare (pentru a repopula canal+valoare corect)
-app.post('/reset-sales', async (req, res) => {
-  try {
-    await db.pool.query('DELETE FROM sales_log');
-    // Stergem marcajul de "procesat" doar pentru vanzari, ca sa reintre in sales_log
-    // (NU atingem stocul - doar repopulam istoricul de analiza)
-    await db.pool.query(`DELETE FROM processed_orders WHERE kind IN ('sale_initial')`);
-    await db.setMeta('initialized', '');  // forteaza re-marcarea ca "initial" fara scadere
-    await sync();
-    res.json({ ok: true, msg: 'Sales resetate si resincronizate' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// METRICI DE BUSINESS - pe luna curenta + pe zi
 app.get('/business', async (req, res) => {
   try {
     const [month, daily, topMonth, channelsMonth, sum7, prices, stock] = await Promise.all([
@@ -388,65 +197,82 @@ app.get('/business', async (req, res) => {
       const price = prices[s.key] || 0;
       const val = +(s.qty * price).toFixed(2);
       stockValue += val;
-      return { key: s.key, label: s.label, qty: s.qty, avgPrice: price, value: val };
+      return { ...s, avgPrice: price, value: val };
     });
     const labelMap = {}; stock.forEach(s => labelMap[s.key] = s.label);
     const topLabeled = topMonth.map(t => ({ ...t, label: labelMap[t.key] || t.key }));
-    const monthName = new Date().toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
-
-    res.json({
-      monthName,
-      month, sales7: sum7,
-      daily,
-      topProducts: topLabeled,
-      channels: channelsMonth,
-      stockValue: +stockValue.toFixed(2),
-      stockValued
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ monthName: new Date().toLocaleDateString('ro-RO',{month:'long',year:'numeric'}), month, sales7: sum7, daily, topProducts: topLabeled, channels: channelsMonth, stockValue: +stockValue.toFixed(2) });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// DIAGNOZA: arata structura unei comenzi reale (ca sa identific canalul)
+app.get('/returns', async (req, res) => {
+  try {
+    const { rows } = await db.pool.query(`SELECT order_id, detail, processed_at FROM processed_orders WHERE kind='return_pending' ORDER BY processed_at DESC LIMIT 80`);
+    res.json({ returns: rows });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/return-decision', async (req, res) => {
+  try {
+    const { orderId, decision } = req.body;
+    const { rows } = await db.pool.query('SELECT detail FROM processed_orders WHERE order_id=$1', [String(orderId)]);
+    if (!rows.length) return res.status(404).json({ error: 'not found' });
+    const value = parseFloat((rows[0].detail||{}).value || 0) || 0;
+    await db.addJournal(decision, `RETUR ${decision} ${orderId}`, 0);
+    await db.pool.query(`INSERT INTO return_dispositions(order_id,decision,value_lei,detail) VALUES($1,$2,$3,$4) ON CONFLICT(order_id) DO UPDATE SET decision=$2,value_lei=$3,decided_at=now()`, [String(orderId), decision, value, JSON.stringify(rows[0].detail)]);
+    await db.pool.query(`UPDATE processed_orders SET kind='return_done' WHERE order_id=$1`, [String(orderId)]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/reports', async (req, res) => {
+  try {
+    const scrap = await db.pool.query(`SELECT COUNT(*)::int AS n, COALESCE(SUM(value_lei),0)::numeric AS total FROM return_dispositions WHERE decision='scrap'`);
+    const olx = await db.pool.query(`SELECT COUNT(*)::int AS n FROM return_dispositions WHERE decision='olx'`);
+    const restocked = await db.pool.query(`SELECT COUNT(*)::int AS n FROM return_dispositions WHERE decision='restock'`);
+    res.json({ scrap:{count:scrap.rows[0].n, valueLei:+scrap.rows[0].total}, olx:{count:olx.rows[0].n, valueLei:0}, restocked:{count:restocked.rows[0].n} });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Curatare + resync complet
+app.post('/clean', async (req, res) => {
+  try {
+    await db.pool.query('DELETE FROM sales_log');
+    await db.pool.query('DELETE FROM processed_orders');
+    await db.pool.query('DELETE FROM journal');
+    await db.pool.query('DROP INDEX IF EXISTS sales_log_uniq');
+    await db.pool.query('CREATE UNIQUE INDEX sales_log_uniq ON sales_log(order_id, stock_key)');
+    await sync();
+    const check = await db.pool.query(`SELECT COUNT(DISTINCT order_id)::int AS orders, COALESCE(SUM(value_lei),0)::numeric AS total FROM sales_log WHERE sold_at >= date_trunc('month', now())`);
+    const stock = await db.getStock();
+    res.json({ ok:true, juneOrders:check.rows[0].orders, juneRevenue:+check.rows[0].total, stockItems:stock.length });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/sync', async (req, res) => { await sync(); res.json({ ok: true }); });
+
+app.post('/ai', async (req, res) => {
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST', headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01'},
+      body: JSON.stringify(req.body)
+    });
+    res.json(await r.json());
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/inspect', async (req, res) => {
   try {
-    // Test paginare: cate comenzi vin total
-    const allOrders = await fetchOrders();
-    const dates = allOrders.map(o => o.order_date || o.created_at || o.date).filter(Boolean);
-    const sorted = dates.slice().sort();
-    // distributie pe luna
-    const byMonth = {};
-    for (const d of dates) {
-      const m = String(d).substring(0, 7);
-      byMonth[m] = (byMonth[m] || 0) + 1;
-    }
-    const orders = allOrders;
-    if (!orders.length) return res.json({ msg: 'nicio comanda' });
-    const o = orders[0];
-    const channels = {};
-    const statuses = {};
-    for (const ord of orders) {
-      const ch = detectChannel(ord);
-      channels[ch] = (channels[ch] || 0) + 1;
-      const st = ord.status || 'fara_status';
-      statuses[st] = (statuses[st] || 0) + 1;
-    }
-    res.json({
-      total_comenzi_trase: allOrders.length,
-      prima_data: sorted[0],
-      ultima_data: sorted[sorted.length-1],
-      pe_luna: byMonth,
-      exemplu_order_date: o.order_date,
-      channels_gasite: channels,
-      statusuri_gasite: statuses
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const products = await fetchProducts();
+    const physical = await computePhysicalStock();
+    const topPhysical = Object.entries(physical).sort((a,b)=>b[1].qty-a[1].qty).slice(0,15).map(([k,v])=>({key:k, label:v.label, qty:v.qty}));
+    res.json({ totalESProducts: products.length, withStock: products.filter(p=>(parseInt(p.stock)||0)>0).length, physicalCategories: Object.keys(physical).length, topPhysicalStock: topPhysical });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ---- Pornire ----
 const PORT = process.env.PORT || 3000;
 db.init().then(() => {
-  app.listen(PORT, () => console.log('StocAI server pornit pe', PORT));
-  // Sync imediat + la fiecare 5 minute
+  app.listen(PORT, () => console.log('StocAI FINAL pe port', PORT));
   sync();
   setInterval(sync, 5 * 60 * 1000);
 }).catch(e => console.error('DB init failed', e));
