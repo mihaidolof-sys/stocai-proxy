@@ -94,7 +94,7 @@ async function sync() {
     if (kind === 'sale') {
       // Identifica canalul (eMAG/Trendyol/magazin) - incearca mai multe campuri
       const channel = detectChannel(o);
-      const orderValue = parseFloat(o.total_value || o.value || 0) || 0;
+      const orderValue = parseFloat(o.value || 0) || 0;  // 'value' fara TVA, cum arata Easy Sales
       // valoarea pe unitate de stoc dedusa (proportional)
       const totalUnits = Object.values(deductions).reduce((a, b) => a + b, 0) || 1;
 
@@ -136,7 +136,7 @@ async function sync() {
       }
       // Doar retururile noi (aparute dupa instalare) ajung in lista de decizie
       if (!(await db.isProcessed(id))) {
-        const value = parseFloat(o.total_value || o.value || 0) || 0;
+        const value = parseFloat(o.value || 0) || 0;
         await db.markProcessed(id, 'return_pending', { products, deductions, value });
       }
     }
@@ -302,6 +302,44 @@ app.post('/reset-all', async (req, res) => {
     // 4. Resincronizare
     await sync();
     res.json({ ok: true, msg: 'Reset complet + resincronizare. Stocul e la baseline, doar comenzile noi de acum vor scadea.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// CURATARE COMPLETA: sterge duplicate din sales_log si recalculeaza
+app.post('/clean', async (req, res) => {
+  try {
+    // 1. Sterge TOATE datele si reporneste curat
+    await db.pool.query('DELETE FROM sales_log');
+    await db.pool.query('DELETE FROM processed_orders');
+    await db.pool.query('DELETE FROM restocked_returns');
+    await db.pool.query('DELETE FROM return_dispositions');
+    await db.pool.query('DELETE FROM journal');
+    
+    // 2. Reseteaza stocul la baseline
+    for (const [key, s] of Object.entries(db.SEED_STOCK)) {
+      await db.pool.query('UPDATE stock SET qty=$1 WHERE key=$2', [s.qty, key]);
+    }
+    
+    // 3. Creaza index unic (daca nu exista) ACUM ca tabelul e gol
+    await db.pool.query('DROP INDEX IF EXISTS sales_log_uniq');
+    await db.pool.query('CREATE UNIQUE INDEX sales_log_uniq ON sales_log(order_id, stock_key)');
+    
+    // 4. Reseteaza flag initializare
+    await db.setMeta('initialized', '');
+    
+    // 5. Resincronizeaza - va rula ca firstRun
+    await sync();
+    
+    // 6. Verifica rezultatul
+    const check = await db.pool.query('SELECT COUNT(*)::int AS rows, COUNT(DISTINCT order_id)::int AS orders, COALESCE(SUM(value_lei),0)::numeric AS total FROM sales_log');
+    
+    res.json({ 
+      ok: true, 
+      rows: check.rows[0].rows,
+      uniqueOrders: check.rows[0].orders,
+      totalValue: +check.rows[0].total,
+      msg: 'Curățare completă. Verifică cifrele.'
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
