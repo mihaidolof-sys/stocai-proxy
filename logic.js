@@ -8,19 +8,76 @@ const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 function inferFromName(name) {
   name = (name || '').toLowerCase();
   const r = [];
-  if (name.includes('3x200') || name.includes('3 x 200')) r.push({ key: 'bariere_200', qty: 3 });
-  else if (name.includes('2x200') && name.includes('160')) { r.push({ key: 'bariere_200', qty: 2 }); r.push({ key: 'bariere_160', qty: 1 }); }
-  else if (name.includes('2x200') && name.includes('180')) { r.push({ key: 'bariere_200', qty: 2 }); r.push({ key: 'bariere_180', qty: 1 }); }
-  else if (name.includes('2x200') && name.includes('140')) { r.push({ key: 'bariere_200', qty: 2 }); r.push({ key: 'bariere_140', qty: 1 }); }
-  else if (name.includes('200')) r.push({ key: 'bariere_200', qty: 1 });
-  else if (name.includes('160')) r.push({ key: 'bariere_160', qty: 1 });
-  else if (name.includes('180')) r.push({ key: 'bariere_180', qty: 1 });
-  else if (name.includes('140')) r.push({ key: 'bariere_140', qty: 1 });
-  if (name.includes('gaming') && (name.includes('albastr') || name.includes('blue'))) r.push({ key: 'scaune_gaming_negru_albastru', qty: 1 });
-  else if (name.includes('gaming') && (name.includes('rosu') || name.includes('roșu') || name.includes('red'))) r.push({ key: 'scaune_gaming_negru_rosu', qty: 1 });
-  else if (name.includes('gaming')) r.push({ key: 'scaune_gaming_negru_albastru', qty: 1 });
-  if (name.includes('ergonomic') && name.includes('gri')) r.push({ key: 'scaune_ergonomic_gri', qty: 1 });
-  else if (name.includes('ergonomic') || name.includes('birou')) r.push({ key: 'scaune_ergonomic_negru', qty: 1 });
+  
+  // BARIERE PAT - verificam sa contina "bariera/bariere/pat/protectie" + dimensiunea
+  const isBarrier = name.includes('barier') || name.includes('protectie pat') || name.includes('protecție pat') || name.includes('baby bear');
+  if (isBarrier || name.includes('set') && (name.includes('200') || name.includes('160') || name.includes('180') || name.includes('140'))) {
+    if (name.includes('3x200') || name.includes('3 x 200')) { r.push({ key: 'bariere_200', qty: 3 }); }
+    else if (name.includes('2x200') && name.includes('160')) { r.push({ key: 'bariere_200', qty: 2 }); r.push({ key: 'bariere_160', qty: 1 }); }
+    else if (name.includes('2x200') && name.includes('180')) { r.push({ key: 'bariere_200', qty: 2 }); r.push({ key: 'bariere_180', qty: 1 }); }
+    else if (name.includes('2x200') && name.includes('140')) { r.push({ key: 'bariere_200', qty: 2 }); r.push({ key: 'bariere_140', qty: 1 }); }
+    else if (name.includes('200')) r.push({ key: 'bariere_200', qty: 1 });
+    else if (name.includes('160')) r.push({ key: 'bariere_160', qty: 1 });
+    else if (name.includes('180')) r.push({ key: 'bariere_180', qty: 1 });
+    else if (name.includes('140')) r.push({ key: 'bariere_140', qty: 1 });
+  }
+  
+  // SCAUNE GAMING
+  if (name.includes('gaming') && !name.includes('birou gaming')) {
+    if (name.includes('albastr') || name.includes('blue')) r.push({ key: 'scaune_gaming_negru_albastru', qty: 1 });
+    else if (name.includes('rosu') || name.includes('roșu') || name.includes('red')) r.push({ key: 'scaune_gaming_negru_rosu', qty: 1 });
+    else r.push({ key: 'scaune_gaming_negru_albastru', qty: 1 });
+  }
+  
+  // SCAUNE ERGONOMICE / BIROU
+  if (r.length === 0 && (name.includes('ergonomic') || (name.includes('scaun') && name.includes('birou')))) {
+    if (name.includes('negru inchis') || name.includes('negru închis') || name.includes('dark')) r.push({ key: 'scaun_ergonomic_negru_inchis', qty: 1 });
+    else if (name.includes('gri') || name.includes('grey') || name.includes('gray')) r.push({ key: 'scaune_ergonomic_gri', qty: 1 });
+    else r.push({ key: 'scaune_ergonomic_negru', qty: 1 });
+  }
+  
+  // LEAGANE ELECTRICE
+  if (r.length === 0 && (name.includes('leagan') || name.includes('leagăn')) && (name.includes('electric') || name.includes('bebelus') || name.includes('bebeluș'))) {
+    r.push({ key: 'leagane_electrice', qty: 1 });
+  }
+  
+  // BABY MONITOR
+  if (r.length === 0 && (name.includes('baby monitor') || name.includes('monitor bebe') || (name.includes('monitor') && name.includes('video') && name.includes('bebe')))) {
+    r.push({ key: 'baby_monitor', qty: 1 });
+  }
+  
+  // BIROU SCANDINAV
+  if (r.length === 0 && (name.includes('birou') && (name.includes('scandinav') || name.includes('homeoffice') || name.includes('home office') || name.includes('calculator')))) {
+    if (name.includes('maro') && name.includes('dark')) r.push({ key: 'birou_maro_dark', qty: 1 });
+    else if (name.includes('maro')) r.push({ key: 'birou_maro', qty: 1 });
+    else if (name.includes('alb')) r.push({ key: 'birou_alb', qty: 1 });
+  }
+  
+  // TARC DE JOACA
+  if (r.length === 0 && (name.includes('tarc') || name.includes('țarc')) && name.includes('joaca')) {
+    r.push({ key: 'p_safe567', qty: 1 });  // default tarc
+  }
+  
+  // MICROFON LAVALIERA
+  if (r.length === 0 && name.includes('microfon') && (name.includes('lavalier') || name.includes('wireless') || name.includes('2 in 1'))) {
+    r.push({ key: 'microfon_lav', qty: 1 });
+  }
+  
+  // ROUTER 4G
+  if (r.length === 0 && name.includes('router') && (name.includes('4g') || name.includes('sim'))) {
+    r.push({ key: 'p_safe545', qty: 1 });
+  }
+  
+  // TROLER COPII
+  if (r.length === 0 && name.includes('troler') && name.includes('copii')) {
+    r.push({ key: 'p_troler1', qty: 1 });
+  }
+  
+  // RUCSAC
+  if (r.length === 0 && name.includes('rucsac') && (name.includes('multifunctional') || name.includes('business') || name.includes('laptop'))) {
+    r.push({ key: 'p_safe123111', qty: 1 });
+  }
+  
   return r;
 }
 
