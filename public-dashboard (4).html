@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StocAI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#0A0E14; --surface:#141A24; --surface2:#1C2530; --border:#222C38;
+  --text:#E6EDF3; --muted:#7D8590; --dim:#4B5563;
+  --green:#3FB950; --yellow:#D29922; --red:#F85149; --blue:#388BFD; --purple:#A371F7;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:'Inter',system-ui,sans-serif; background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased; }
+.mono { font-family:'JetBrains Mono',monospace; }
+.app { display:flex; min-height:100vh; }
+.sidebar { width:220px; background:var(--surface); border-right:1px solid var(--border); padding:20px 12px; position:fixed; height:100vh; display:flex; flex-direction:column; z-index:50; transition:transform .25s; }
+.logo { display:flex; align-items:center; gap:9px; padding:4px 10px 20px; }
+.logo-mark { width:30px; height:30px; border-radius:8px; background:linear-gradient(135deg,var(--blue),var(--purple)); display:flex; align-items:center; justify-content:center; font-size:16px; }
+.logo-text { font-weight:700; font-size:16px; letter-spacing:-.02em; }
+.logo-text small { display:block; font-size:9px; color:var(--muted); font-weight:500; letter-spacing:.08em; text-transform:uppercase; }
+.nav { display:flex; flex-direction:column; gap:2px; flex:1; }
+.nav-item { display:flex; align-items:center; gap:11px; padding:9px 11px; border-radius:8px; color:var(--muted); cursor:pointer; font-size:13.5px; font-weight:500; border:none; background:none; text-align:left; width:100%; transition:all .15s; font-family:inherit; }
+.nav-item:hover { background:var(--surface2); color:var(--text); }
+.nav-item.active { background:var(--surface2); color:var(--text); }
+.nav-item.active .ni { color:var(--blue); }
+.ni { width:17px; text-align:center; font-size:15px; }
+.nav-foot { font-size:10px; color:var(--dim); padding:10px; line-height:1.5; border-top:1px solid var(--border); }
+.dotg { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--green); margin-right:5px; animation:pulse 2.5s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+.main { flex:1; margin-left:220px; min-width:0; }
+.topbar { height:56px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; padding:0 24px; position:sticky; top:0; background:rgba(10,14,20,.85); backdrop-filter:blur(12px); z-index:40; }
+.topbar h1 { font-size:16px; font-weight:600; letter-spacing:-.01em; }
+.topbar-actions { display:flex; gap:8px; align-items:center; }
+.menu-btn { display:none; background:none; border:none; color:var(--text); font-size:20px; cursor:pointer; }
+.content { padding:24px; max-width:1400px; }
+.view { display:none; }
+.view.active { display:block; animation:fade .3s; }
+@keyframes fade { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
+.btn { border:1px solid var(--border); background:var(--surface); color:var(--text); border-radius:8px; padding:8px 14px; font-size:12.5px; font-weight:600; cursor:pointer; transition:all .15s; font-family:inherit; display:inline-flex; align-items:center; gap:6px; }
+.btn:hover { background:var(--surface2); border-color:var(--dim); }
+.btn-primary { background:var(--blue); border-color:var(--blue); color:#fff; }
+.btn-primary:hover { background:#2f7ce8; }
+.btn-sm { padding:6px 10px; font-size:11.5px; }
+.btn-green { background:var(--green); border-color:var(--green); color:#04130a; }
+.btn-purple { background:var(--purple); border-color:var(--purple); color:#fff; }
+.btn-red { background:var(--red); border-color:var(--red); color:#fff; }
+.kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:22px; }
+.kpi { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px; position:relative; overflow:hidden; }
+.kpi::after { content:''; position:absolute; top:0; right:0; width:60px; height:60px; background:radial-gradient(circle at top right,var(--accent,transparent),transparent 70%); opacity:.15; }
+.kpi .label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; font-weight:600; margin-bottom:10px; }
+.kpi .val { font-size:26px; font-weight:700; letter-spacing:-.02em; }
+.kpi .sub { font-size:11px; color:var(--dim); margin-top:5px; }
+.card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px; margin-bottom:16px; }
+.card-h { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+.card-h h2 { font-size:13px; font-weight:600; letter-spacing:-.01em; }
+.card-h .eyebrow { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; font-weight:600; }
+.stock-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; }
+.stock-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:15px; transition:border-color .15s; }
+.stock-card:hover { border-color:var(--dim); }
+.stock-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; }
+.stock-name { font-size:12.5px; color:var(--muted); font-weight:500; max-width:70%; line-height:1.35; }
+.stock-qty { font-size:24px; font-weight:700; letter-spacing:-.02em; }
+.thermo { height:5px; background:var(--surface2); border-radius:3px; overflow:hidden; margin:8px 0 6px; }
+.thermo-fill { height:100%; border-radius:3px; transition:width .4s; }
+.stock-pred { font-size:11px; font-weight:500; display:flex; justify-content:space-between; }
+.row { display:flex; align-items:center; justify-content:space-between; padding:11px 0; border-bottom:1px solid var(--border); font-size:13px; }
+.row:last-child { border:none; }
+.row .l { color:var(--muted); display:flex; align-items:center; gap:9px; }
+.rank { width:20px; height:20px; border-radius:6px; background:var(--surface2); display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--muted); }
+.row .r { font-weight:600; font-family:'JetBrains Mono',monospace; font-size:12px; }
+.o-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:10px; }
+.o-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.o-id { font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:600; color:var(--blue); }
+.o-prod { font-size:12.5px; color:var(--text); line-height:1.5; margin-bottom:10px; }
+.tag { font-size:10px; font-weight:600; padding:3px 8px; border-radius:20px; }
+.tag-ret { background:rgba(248,81,73,.12); color:var(--red); }
+.o-actions { display:flex; gap:7px; flex-wrap:wrap; }
+.alert { display:flex; align-items:center; gap:10px; padding:12px 15px; border-radius:11px; margin-bottom:10px; font-size:13px; }
+.alert.r { background:rgba(248,81,73,.08); border:1px solid rgba(248,81,73,.3); }
+.alert.y { background:rgba(210,153,34,.07); border:1px solid rgba(210,153,34,.25); }
+.alert b { font-weight:600; }
+.chart { display:flex; align-items:flex-end; gap:3px; height:160px; padding:10px 0; }
+.bar-col { flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; min-width:0; }
+.bar { width:100%; max-width:22px; background:linear-gradient(180deg,var(--blue),rgba(56,139,253,.4)); border-radius:3px 3px 0 0; transition:height .4s; min-height:2px; }
+.bar-n { font-size:9px; color:var(--muted); font-family:'JetBrains Mono',monospace; }
+.bar-d { font-size:9px; color:var(--dim); }
+.empty { text-align:center; padding:40px 20px; color:var(--dim); }
+.empty .ic { font-size:30px; margin-bottom:8px; opacity:.6; }
+.search { width:100%; background:var(--surface); border:1px solid var(--border); border-radius:9px; padding:10px 14px; color:var(--text); font-size:13px; outline:none; margin-bottom:16px; font-family:inherit; }
+.search:focus { border-color:var(--blue); }
+.chat-wrap { display:flex; flex-direction:column; height:calc(100vh - 160px); }
+.chat-msgs { flex:1; overflow-y:auto; padding-right:6px; }
+.msg { margin-bottom:14px; display:flex; gap:10px; max-width:85%; }
+.msg.u { flex-direction:row-reverse; margin-left:auto; }
+.av { width:30px; height:30px; border-radius:9px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:14px; }
+.av.ai { background:linear-gradient(135deg,var(--blue),var(--purple)); }
+.av.u { background:var(--surface2); }
+.bubble { padding:11px 15px; border-radius:13px; font-size:13.5px; line-height:1.55; }
+.msg.ai .bubble { background:var(--surface); border:1px solid var(--border); border-top-left-radius:4px; }
+.msg.u .bubble { background:var(--blue); color:#fff; border-top-right-radius:4px; }
+.chat-input { display:flex; gap:9px; margin-top:14px; }
+.chat-input input { flex:1; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px 15px; color:var(--text); font-size:13.5px; outline:none; font-family:inherit; }
+.chat-input input:focus { border-color:var(--blue); }
+.suggest { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:12px; }
+.chip { background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:6px 12px; font-size:11.5px; color:var(--muted); cursor:pointer; transition:all .15s; font-family:inherit; }
+.chip:hover { border-color:var(--blue); color:var(--text); }
+.lock-screen { text-align:center; padding:50px 20px; }
+.lock-screen .ic { font-size:38px; margin-bottom:14px; }
+.lock-screen input { background:var(--surface); border:1px solid var(--border); border-radius:9px; padding:11px 15px; color:var(--text); font-size:14px; outline:none; width:220px; margin:0 8px 0 0; font-family:inherit; }
+.lock-screen input:focus { border-color:var(--blue); }
+.skeleton { background:linear-gradient(90deg,var(--surface),var(--surface2),var(--surface)); background-size:200% 100%; animation:shimmer 1.4s infinite; border-radius:14px; }
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+.overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:45; }
+@media(max-width:860px){
+  .sidebar { transform:translateX(-100%); }
+  .sidebar.open { transform:none; }
+  .main { margin-left:0; }
+  .menu-btn { display:block; }
+  .overlay.show { display:block; }
+  .kpi-grid { grid-template-columns:repeat(2,1fr); }
+  .content { padding:16px; }
+  #ov-split { grid-template-columns:1fr !important; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="logo"><div class="logo-mark">📦</div><div class="logo-text">StocAI<small>Easy Sales</small></div></div>
+    <nav class="nav">
+      <button class="nav-item active" data-view="overview"><span class="ni">◆</span> Prezentare</button>
+      <button class="nav-item" data-view="stock"><span class="ni">▦</span> Stoc</button>
+      <button class="nav-item" data-view="returns"><span class="ni">↩</span> Retururi</button>
+      <button class="nav-item" data-view="reports"><span class="ni">▲</span> Rapoarte</button>
+      <button class="nav-item" data-view="assistant"><span class="ni">✦</span> Asistent AI</button>
+    </nav>
+    <div class="nav-foot"><div><span class="dotg"></span><span id="conn-status">Conectare...</span></div><div id="last-sync" style="margin-top:5px"></div></div>
+  </aside>
+  <div class="overlay" id="overlay" onclick="closeMenu()"></div>
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:12px"><button class="menu-btn" onclick="openMenu()">☰</button><h1 id="view-title">Prezentare</h1></div>
+      <div class="topbar-actions"><button class="btn btn-sm" onclick="forceSync()">↻ Sincronizează</button><button class="btn btn-sm btn-red" onclick="resetAll()">🔧 Reset complet</button></div>
+    </div>
+    <div class="content">
+      <div class="view active" id="view-overview">
+        <div id="alerts"></div>
+        <div class="kpi-grid" id="kpis">
+          <div class="kpi skeleton" style="height:90px"></div><div class="kpi skeleton" style="height:90px"></div>
+          <div class="kpi skeleton" style="height:90px"></div><div class="kpi skeleton" style="height:90px"></div>
+        </div>
+        <div class="card"><div class="card-h"><h2>Vânzări pe zi</h2><span class="eyebrow" id="chart-month">luna curentă</span></div><div class="chart" id="chart"></div></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px" id="ov-split">
+          <div class="card"><div class="card-h"><h2>Top produse</h2><span class="eyebrow">luna</span></div><div id="ov-top"></div></div>
+          <div class="card"><div class="card-h"><h2>Pe canal</h2><span class="eyebrow">luna</span></div><div id="ov-channels"></div></div>
+        </div>
+      </div>
+      <div class="view" id="view-stock">
+        <input class="search" id="stock-search" placeholder="Caută produs..." oninput="renderStock()">
+        <div class="stock-list" id="stock-list"></div>
+      </div>
+      <div class="view" id="view-returns">
+        <p style="font-size:12.5px;color:var(--muted);margin-bottom:16px;line-height:1.5">Retururile și anulările apar aici. Tu decizi ce se întâmplă cu fiecare — nimic nu intră automat în stoc.</p>
+        <div id="returns-list"></div>
+      </div>
+      <div class="view" id="view-reports">
+        <div id="reports-locked" style="display:none"><div class="card"><div class="lock-screen">
+          <div class="ic">🔒</div>
+          <div style="color:var(--muted);font-size:13.5px;margin-bottom:18px">Rapoartele conțin date confidențiale: vânzări, venituri, valoarea stocului.</div>
+          <input type="password" id="rep-pass" placeholder="Parolă" onkeydown="if(event.key==='Enter')unlockReports()">
+          <button class="btn btn-primary" onclick="unlockReports()">Deblochează</button>
+          <div id="rep-err" style="color:var(--red);font-size:12px;margin-top:10px"></div>
+        </div></div></div>
+        <div id="reports-content">
+          <div class="kpi-grid" id="rep-kpis"></div>
+          <div class="card"><div class="card-h"><h2>Retururi procesate</h2><span class="eyebrow">istoric</span></div><div id="rep-returns"></div></div>
+          <button class="btn btn-sm" onclick="lockReports()">🔒 Blochează rapoartele</button>
+        </div>
+      </div>
+      <div class="view" id="view-assistant">
+        <div class="chat-wrap">
+          <div class="chat-msgs" id="chat-msgs"><div class="msg ai"><div class="av ai">✦</div><div class="bubble">Salut! Serverul lucrează 24/7 și scade comenzile automat. Întreabă-mă orice despre stoc, vânzări sau ce să comanzi.</div></div></div>
+          <div class="suggest">
+            <button class="chip" onclick="ask('Ce trebuie să comand urgent?')">Ce comand urgent?</button>
+            <button class="chip" onclick="ask('Care e cel mai bun canal de vânzare?')">Cel mai bun canal?</button>
+            <button class="chip" onclick="ask('Ce produs s-a vândut cel mai bine luna asta?')">Top vânzări</button>
+            <button class="chip" onclick="ask('Cât valorează stocul meu?')">Valoare stoc</button>
+          </div>
+          <div class="chat-input"><input id="cinput" placeholder="Scrie un mesaj..." onkeydown="if(event.key==='Enter')sendMsg()"><button class="btn btn-primary" onclick="sendMsg()">Trimite</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const SERVER='';
+let stockData=[], businessData=null, returnsData=[];
+const titles={overview:'Prezentare',stock:'Stoc',returns:'Retururi',reports:'Rapoarte',assistant:'Asistent AI'};
+document.querySelectorAll('.nav-item').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+  const v=b.dataset.view;
+  document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
+  document.getElementById('view-'+v).classList.add('active');
+  document.getElementById('view-title').textContent=titles[v];
+  if(v==='reports') applyReportLock();
+  closeMenu();
+});
+function openMenu(){document.getElementById('sidebar').classList.add('open');document.getElementById('overlay').classList.add('show');}
+function closeMenu(){document.getElementById('sidebar').classList.remove('open');document.getElementById('overlay').classList.remove('show');}
+async function load(){
+  try{
+    const r=await fetch(SERVER+'/state'); const d=await r.json();
+    stockData=d.stock||[];
+    document.getElementById('conn-status').textContent='Conectat';
+    const ls=d.lastSync?new Date(d.lastSync).toLocaleString('ro-RO',{hour:'2-digit',minute:'2-digit',day:'numeric',month:'short'}):'—';
+    document.getElementById('last-sync').textContent='Sync: '+ls;
+    renderStock(); renderAlerts(); loadBusiness(); loadReturns();
+  }catch(e){ document.getElementById('conn-status').textContent='Server indisponibil'; }
+}
+function thermoColor(d){if(d===null)return 'var(--dim)';if(d<=7)return 'var(--red)';if(d<=21)return 'var(--yellow)';return 'var(--green)';}
+function renderStock(){
+  const q=(document.getElementById('stock-search').value||'').toLowerCase();
+  const list=stockData.filter(s=>!q||s.label.toLowerCase().includes(q));
+  const el=document.getElementById('stock-list');
+  if(!list.length){el.innerHTML='<div class="empty"><div class="ic">▦</div>Niciun produs</div>';return;}
+  el.innerHTML=list.map(s=>{
+    const d=s.daysLeft,col=thermoColor(d);
+    const pct=d===null?8:Math.max(6,Math.min(100,(d/60)*100));
+    let pred;
+    if(s.perDay>0&&d!==null){const ro=new Date(Date.now()+d*86400000).toLocaleDateString('ro-RO',{day:'numeric',month:'short'});
+      pred=`<span style="color:${col}">~${d} zile</span><span style="color:var(--dim)">${s.perDay}/zi · ${ro}</span>`;}
+    else pred=`<span style="color:var(--dim)">fără vânzări recente</span><span></span>`;
+    return `<div class="stock-card"><div class="stock-top"><div class="stock-name">${s.label}</div><div class="stock-qty mono" style="color:${s.color||'var(--text)'}">${s.qty}</div></div><div class="thermo"><div class="thermo-fill" style="width:${pct}%;background:${col}"></div></div><div class="stock-pred">${pred}</div></div>`;
+  }).join('');
+}
+function renderAlerts(){
+  const u=stockData.filter(s=>s.daysLeft!==null&&s.daysLeft<=7);
+  const so=stockData.filter(s=>s.daysLeft!==null&&s.daysLeft>7&&s.daysLeft<=21);
+  let h='';
+  if(u.length)h+=`<div class="alert r">🔴 <b>${u.length} produse urgente</b> (sub 7 zile): ${u.map(s=>s.label).join(', ')}</div>`;
+  if(so.length)h+=`<div class="alert y">🟡 <b>${so.length} de comandat curând</b>: ${so.map(s=>s.label).join(', ')}</div>`;
+  document.getElementById('alerts').innerHTML=h;
+}
+async function loadBusiness(){
+  try{
+    const r=await fetch(SERVER+'/business'); const d=await r.json(); businessData=d;
+    document.getElementById('kpis').innerHTML=`
+      <div class="kpi" style="--accent:var(--blue)"><div class="label">Comenzi luna</div><div class="val mono">${d.month.orders}</div><div class="sub">${d.monthName||''}</div></div>
+      <div class="kpi" style="--accent:var(--green)"><div class="label">Vânzări luna</div><div class="val mono" style="color:var(--green)">${fmtLei(d.month.revenue)}</div><div class="sub">medie ${fmtLei(d.month.avgOrder)}/cmd</div></div>
+      <div class="kpi" style="--accent:var(--purple)"><div class="label">Valoare stoc</div><div class="val mono" style="color:var(--blue)">${fmtLei(d.stockValue)}</div><div class="sub">preț vânzare</div></div>
+      <div class="kpi" style="--accent:var(--yellow)"><div class="label">Ultimele 7 zile</div><div class="val mono">${d.sales7.orders}</div><div class="sub">${fmtLei(d.sales7.revenue)}</div></div>`;
+    const daily=d.daily||[]; const max=Math.max(...daily.map(x=>x.revenue),1);
+    document.getElementById('chart').innerHTML=daily.map(x=>{const h=Math.max(2,Math.round((x.revenue/max)*120));
+      return `<div class="bar-col" title="${x.day}: ${x.orders} cmd, ${fmtLei(x.revenue)}"><div class="bar-n">${x.orders}</div><div class="bar" style="height:${h}px"></div><div class="bar-d">${new Date(x.day).getDate()}</div></div>`;}).join('');
+    document.getElementById('ov-top').innerHTML=(d.topProducts||[]).slice(0,6).map((t,i)=>`<div class="row"><span class="l"><span class="rank">${i+1}</span>${t.label}</span><span class="r">${t.units} buc · ${fmtLei(t.revenue)}</span></div>`).join('')||emptyRow();
+    document.getElementById('ov-channels').innerHTML=(d.channels||[]).map(c=>`<div class="row"><span class="l">${c.channel}</span><span class="r">${c.orders} · ${fmtLei(c.revenue)}</span></div>`).join('')||emptyRow();
+    document.getElementById('rep-kpis').innerHTML=`
+      <div class="kpi"><div class="label">Comenzi luna</div><div class="val mono">${d.month.orders}</div></div>
+      <div class="kpi"><div class="label">Venituri luna</div><div class="val mono" style="color:var(--green)">${fmtLei(d.month.revenue)}</div></div>
+      <div class="kpi"><div class="label">Valoare stoc</div><div class="val mono" style="color:var(--blue)">${fmtLei(d.stockValue)}</div></div>
+      <div class="kpi"><div class="label">Medie/comandă</div><div class="val mono">${fmtLei(d.month.avgOrder)}</div></div>`;
+    loadReports();
+  }catch(e){}
+}
+async function loadReports(){
+  try{const r=await fetch(SERVER+'/reports');const d=await r.json();
+    document.getElementById('rep-returns').innerHTML=`
+      <div class="row"><span class="l">🗑️ Casate</span><span class="r" style="color:var(--red)">${d.scrap.count} buc · ${fmtLei(d.scrap.valueLei)} pierdere</span></div>
+      <div class="row"><span class="l">🏷️ Pe OLX</span><span class="r" style="color:var(--purple)">${d.olx.count} buc</span></div>
+      <div class="row"><span class="l">✅ Returnate în stoc</span><span class="r" style="color:var(--green)">${d.restocked.count} buc</span></div>`;
+  }catch(e){}
+}
+async function loadReturns(){
+  try{const r=await fetch(SERVER+'/returns');const d=await r.json();returnsData=d.returns||[];
+    const el=document.getElementById('returns-list');
+    if(!returnsData.length){el.innerHTML='<div class="empty"><div class="ic">↩</div>Niciun retur de procesat</div>';return;}
+    el.innerHTML=returnsData.map(r=>{const det=r.detail||{};const val=det.value?fmtLei(+det.value):'—';
+      const prods=(det.products||[]).map(p=>`${p.qty}× ${p.name}`).join('<br>');
+      return `<div class="o-card"><div class="o-head"><span class="o-id">↩ ${r.order_id}</span><span class="tag tag-ret">${val}</span></div><div class="o-prod">${prods}</div><div class="o-actions"><button class="btn btn-green btn-sm" onclick="decide('${r.order_id}','restock')">✅ Bun → Stoc</button><button class="btn btn-purple btn-sm" onclick="decide('${r.order_id}','olx')">🏷️ OLX</button><button class="btn btn-red btn-sm" onclick="decide('${r.order_id}','scrap')">🗑️ Casare</button></div></div>`;
+    }).join('');
+  }catch(e){}
+}
+async function decide(id,decision){
+  if(decision==='scrap'&&!confirm('Casezi acest produs? Se înregistrează ca pierdere.'))return;
+  await fetch(SERVER+'/return-decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({orderId:id,decision})});
+  load();
+}
+function fmtLei(n){n=+n||0;if(n>=10000)return (n/1000).toFixed(1)+'k lei';return Math.round(n).toLocaleString('ro-RO')+' lei';}
+function emptyRow(){return '<div style="font-size:12px;color:var(--dim);padding:8px 0">Fără date încă</div>';}
+async function forceSync(){document.getElementById('last-sync').textContent='Sync: în curs...';await fetch(SERVER+'/sync',{method:'POST'});load();}
+async function resetAll(){
+  if(!confirm('CURĂȚARE COMPLETĂ: golește tot, creează protecție anti-duplicate, recalculează. Stocul revine la baseline. Continui?'))return;
+  if(!confirm('Ești sigur? Acțiunea nu poate fi anulată.'))return;
+  document.getElementById('last-sync').textContent='Curățare în curs (1-3 min)...';
+  try {
+    const r = await fetch(SERVER+'/clean',{method:'POST'});
+    const d = await r.json();
+    if(d.ok) alert('Curățare completă!\nComenzi: '+d.uniqueOrders+'\nValoare: '+Math.round(d.totalValue)+' lei\nRânduri: '+d.rows);
+  } catch(e) { alert('Eroare: '+e.message); }
+  load();
+}
+let repUnlocked=false;
+function bizHash(s){let h=0;for(let i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))|0;}return String(h);}
+function getPass(){try{return localStorage.getItem('stocai_rep_pass');}catch(e){return null;}}
+function setPass(h){try{localStorage.setItem('stocai_rep_pass',h);}catch(e){}}
+function applyReportLock(){
+  const locked=document.getElementById('reports-locked'),content=document.getElementById('reports-content');
+  if(!getPass())repUnlocked=true;
+  if(repUnlocked){locked.style.display='none';content.style.display='block';}
+  else{locked.style.display='block';content.style.display='none';}
+}
+function unlockReports(){
+  const v=document.getElementById('rep-pass').value,err=document.getElementById('rep-err');
+  if(!v){err.textContent='Introdu parola';return;}
+  const saved=getPass();
+  if(!saved){setPass(bizHash(v));repUnlocked=true;applyReportLock();alert('Parolă setată! O folosești data viitoare.');}
+  else if(bizHash(v)===saved){repUnlocked=true;applyReportLock();err.textContent='';}
+  else err.textContent='Parolă greșită';
+}
+function lockReports(){repUnlocked=false;applyReportLock();}
+let conv=[];
+function ask(q){document.getElementById('cinput').value=q;sendMsg();}
+async function sendMsg(){
+  const inp=document.getElementById('cinput');const msg=inp.value.trim();if(!msg)return;
+  inp.value='';addMsg('u',msg);
+  const stockSummary=stockData.map(s=>{const p=s.perDay>0?` | ${s.perDay}/zi → ~${s.daysLeft} zile`:' | fără vânzări';return `- ${s.label}: ${s.qty} buc${p}`;}).join('\n');
+  let biz='Date indisponibile.';
+  if(!repUnlocked&&getPass())biz='PROTEJAT cu parolă. Nu dezvălui cifre de vânzări/venituri. Spune utilizatorului să deblocheze Rapoartele.';
+  else if(businessData){const b=businessData;
+    const top=(b.topProducts||[]).slice(0,8).map((t,i)=>`  ${i+1}. ${t.label}: ${t.units} buc, ${Math.round(t.revenue)} lei`).join('\n');
+    const ch=(b.channels||[]).map(c=>`  ${c.channel}: ${c.orders} cmd, ${Math.round(c.revenue)} lei`).join('\n');
+    biz=`LUNA (${b.monthName}): ${b.month.orders} comenzi, ${Math.round(b.month.revenue)} lei (medie ${b.month.avgOrder})\nVALOARE STOC: ${Math.round(b.stockValue)} lei\nTOP:\n${top}\nCANALE:\n${ch}`;}
+  const sys=`Ești expert e-commerce și gestiune stoc. Răspunzi în română, concis, cu cifre.\nSTOC+PREDICȚIE:\n${stockSummary}\n\nBUSINESS:\n${biz}\n\nPrioritizează produsele sub 21 zile (sub 7=urgent). Folosește doar cifrele de mai sus.`;
+  conv.push({role:'user',content:msg});
+  const tid=addMsg('ai','…');
+  try{
+    const r=await fetch(SERVER+'/ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:700,system:sys,messages:conv.slice(-8)})});
+    const d=await r.json();const txt=d.content?.[0]?.text||'Eroare.';
+    conv.push({role:'assistant',content:txt});
+    document.getElementById(tid).querySelector('.bubble').innerHTML=fmt(txt);
+  }catch(e){document.getElementById(tid).querySelector('.bubble').textContent='Eroare de conexiune.';}
+}
+function addMsg(role,txt){
+  const id='m'+Date.now()+Math.random().toString(36).slice(2,5);
+  const d=document.createElement('div');d.className='msg '+role;d.id=id;
+  d.innerHTML=`<div class="av ${role}">${role==='ai'?'✦':'·'}</div><div class="bubble">${fmt(txt)}</div>`;
+  document.getElementById('chat-msgs').appendChild(d);
+  const c=document.getElementById('chat-msgs');c.scrollTop=c.scrollHeight;return id;
+}
+function fmt(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');}
+load();
+setInterval(load,60000);
+applyReportLock();
+</script>
+</body>
+</html>
