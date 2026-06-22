@@ -91,6 +91,15 @@ function inferFromName(name) {
 
 async function askAI(name, sku) {
   if (!ANTHROPIC_KEY) return null;
+  // Limita zilnica de apeluri AI - protectie cost (max 200/zi)
+  const today = new Date().toISOString().substring(0,10);
+  const counterKey = 'ai_calls_' + today;
+  let count = parseInt(await db.getMeta(counterKey)) || 0;
+  if (count >= 200) {
+    console.log('Limita zilnica AI atinsa (200), produs marcat pentru verificare manuala');
+    return { rules: [], uncertain: true };
+  }
+  await db.setMeta(counterKey, count + 1);
   try {
     const keys = Object.keys(db.SEED_STOCK).map(k => `${k} = ${db.SEED_STOCK[k].label}`).join('\n');
     const sys = `Mapezi produse de marketplace la stoc fizic de baze. Produse disponibile:
