@@ -98,7 +98,7 @@ async function sync() {
         }
 
         if (review) {
-          await db.markProcessed(id, 'review', { products, deductions });
+          await db.markProcessed(id, 'review', { products, deductions, channel, value: orderValue, date: new Date(t).toISOString() });
           continue; // necesita verificare manuala, nu scade automat
         }
 
@@ -108,7 +108,7 @@ async function sync() {
           const st = db.SEED_STOCK[k] || { label: k };
           await db.addJournal('out', `CMD ${id} → ${st.label}`, -v);
         }
-        await db.markProcessed(id, 'sale', deductions);
+        await db.markProcessed(id, 'sale', { products, deductions, channel, value: orderValue, date: new Date(t).toISOString() });
         autoProcessed++;
 
       } else if (kind === 'return') {
@@ -176,6 +176,17 @@ app.get('/business', async (req, res) => {
     const labelMap = {}; stock.forEach(s => labelMap[s.key] = s.label);
     const topLabeled = topMonth.map(t => ({ ...t, label: labelMap[t.key] || t.key }));
     res.json({ monthName: new Date().toLocaleDateString('ro-RO',{month:'long',year:'numeric'}), month, sales7: sum7, daily, topProducts: topLabeled, channels: channelsMonth, stockValue: +stockValue.toFixed(2) });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Comenzi recente procesate (vanzari) - ultimele N, cu detalii
+app.get('/recent-orders', async (req, res) => {
+  try {
+    const { rows } = await db.pool.query(
+      `SELECT order_id, kind, detail, processed_at FROM processed_orders
+       WHERE kind IN ('sale','review') ORDER BY processed_at DESC LIMIT 60`
+    );
+    res.json({ orders: rows });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
