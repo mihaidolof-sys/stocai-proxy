@@ -154,6 +154,22 @@ async function sync() {
 // ============ API pentru aplicatie ============
 app.get('/test', (req, res) => res.json({ status: 'ok', ai: !!ANTHROPIC_KEY, es: !!ES_TOKEN, db: !!process.env.DATABASE_URL }));
 
+// Descopera endpoint-ul de produse din Easy Sales
+app.get('/discover-products', async (req, res) => {
+  const results = {};
+  const endpoints = ['/products', '/products?per_page=5', '/stock', '/stocks', '/inventory'];
+  for (const ep of endpoints) {
+    try {
+      const r = await fetch(`${ES_BASE}${ep}`, { headers: H() });
+      const txt = await r.text();
+      let data;
+      try { data = JSON.parse(txt); } catch(e) { data = txt.substring(0, 200); }
+      results[ep] = { status: r.status, sample: typeof data === 'object' ? JSON.stringify(data).substring(0, 500) : data };
+    } catch(e) { results[ep] = { error: e.message }; }
+  }
+  res.json(results);
+});
+
 // Situatia completa pentru dashboard
 app.get('/state', async (req, res) => {
   try {
