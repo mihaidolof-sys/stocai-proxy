@@ -135,8 +135,12 @@ async function resolveProduct(p) {
   return { rules: [], review: true };
 }
 
-function classify(status) {
+function classify(status, deliveryStatus) {
   const s = (status || '').toLowerCase().trim();
+  const ds = (deliveryStatus || '').toLowerCase().trim();
+  // Verifica AWB/delivery status (colet refuzat/neridicat la curier, indiferent de statusul comenzii)
+  const deliveryReturnWords = ['cancel','canceled','cancelled','anulat','anulată','return','retur','refused','refuzat'];
+  if (deliveryReturnWords.some(x => ds.includes(x))) return 'return';
   // Retur / anulare (romaneste + engleza) - produsul se intoarce sau nu pleaca
   const returnWords = ['returned','retur','returnat','returnată','returnata','refused','refuzat','refuzată'];
   const cancelWords = ['cancel','canceled','cancelled','anulat','anulată','anulata'];
