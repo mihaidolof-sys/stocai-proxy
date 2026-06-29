@@ -285,13 +285,21 @@ app.get('/inspect', async (req, res) => {
   try {
     const orders = await fetchOrders(3);
     const stock = await db.getStock();
-    const statuses = {}, channels = {};
+    const statuses = {}, channels = {}, deliveryStatuses = {};
     orders.forEach(o => {
       statuses[o.status||'?'] = (statuses[o.status||'?']||0)+1;
       const ch = o.marketplace || '?';
       channels[ch] = (channels[ch]||0)+1;
+      // Verifica AWB/delivery status (poate fi diferit de status-ul comenzii)
+      const ds = o.delivery_status?.description || o.delivery_status?.value || (o.shipments && o.shipments[0] && o.shipments[0].delivery_status && o.shipments[0].delivery_status.description);
+      if (ds) deliveryStatuses[ds] = (deliveryStatuses[ds]||0)+1;
     });
-    res.json({ ordersLoaded: orders.length, statuses, channels, stockItems: stock.length, sampleOrder: orders[0] ? { id: orders[0].order_display_id, status: orders[0].status, marketplace: orders[0].marketplace, value: orders[0].value } : null });
+    const sampleWithDelivery = orders.find(o => o.delivery_status || (o.shipments && o.shipments[0]));
+    res.json({
+      ordersLoaded: orders.length, statuses, channels, deliveryStatuses, stockItems: stock.length,
+      sampleOrder: orders[0] ? { id: orders[0].order_display_id, status: orders[0].status, marketplace: orders[0].marketplace, value: orders[0].value } : null,
+      sampleDeliveryStatus: sampleWithDelivery ? { order: sampleWithDelivery.order_display_id, delivery_status: sampleWithDelivery.delivery_status, shipment_delivery: sampleWithDelivery.shipments?.[0]?.delivery_status, cancel_request: sampleWithDelivery.cancel_request } : null
+    });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
