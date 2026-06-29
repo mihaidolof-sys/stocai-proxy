@@ -56,7 +56,8 @@ async function sync() {
     for (const o of orders) {
       const id = String(o.order_display_id || o.id || '');
       if (!id) continue;
-      const kind = logic.classify(o.status);
+      const deliveryStatus = o.delivery_status?.description || o.delivery_status?.value || (o.shipments && o.shipments[0] && o.shipments[0].delivery_status && o.shipments[0].delivery_status.description) || '';
+      const kind = logic.classify(o.status, deliveryStatus);
       if (kind === 'ignore') continue;
 
       const rawDate = o.order_date || o.created_at || '';
