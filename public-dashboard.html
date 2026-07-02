@@ -197,6 +197,31 @@ body { font-family:'Inter',system-ui,sans-serif; background:var(--bg); color:var
     </div>
   </div>
 </div>
+
+<!-- Modal NIR / Ajustare stoc -->
+<div id="adjust-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;width:100%;max-width:480px;max-height:85vh;display:flex;flex-direction:column;overflow:hidden">
+    <div style="padding:18px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <h2 style="font-size:15px;font-weight:600">➕ NIR / Ajustează stoc</h2>
+      <button onclick="closeAdjust()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1">×</button>
+    </div>
+    <div style="padding:16px 20px 0">
+      <input class="search" id="adjust-search" placeholder="Caută produs..." oninput="renderAdjustList(this.value)" style="margin-bottom:12px">
+    </div>
+    <div id="adjust-list" style="overflow-y:auto;padding:0 20px;flex:1;min-height:120px;max-height:320px"></div>
+    <div id="adjust-qty-row" style="display:none;padding:16px 20px;border-top:1px solid var(--border)">
+      <div id="adjust-selected-label" style="font-size:13px;color:var(--text);margin-bottom:10px;font-weight:600"></div>
+      <input class="search" id="adjust-delta" type="number" placeholder="Câte bucăți adaugi? (minus pentru scădere, ex: 200 sau -10)" style="margin-bottom:8px">
+      <input class="search" id="adjust-note" placeholder="Notă (opțional, ex: NIR furnizor X)" style="margin-bottom:12px">
+      <button class="btn btn-primary" onclick="confirmAdjust()" style="width:100%;justify-content:center">Salvează</button>
+    </div>
+  </div>
+</div>
+<style>
+.adjust-row { display:flex; justify-content:space-between; align-items:center; padding:10px 8px; border-radius:8px; cursor:pointer; font-size:13px; transition:background .15s; }
+.adjust-row:hover { background:var(--surface2); }
+</style>
+
 <script>
 const SERVER='';
 let stockData=[], businessData=null, returnsData=[];
@@ -317,21 +342,45 @@ function fmtLei(n){n=+n||0;if(n>=10000)return (n/1000).toFixed(1)+'k lei';return
 function emptyRow(){return '<div style="font-size:12px;color:var(--dim);padding:8px 0">Fără date încă</div>';}
 async function forceSync(){document.getElementById('last-sync').textContent='Sync: în curs...';await fetch(SERVER+'/sync',{method:'POST'});load();}
 
-async function openAdjust(){
+let adjustSelectedKey=null;
+function openAdjust(){
   if(!stockData.length){alert('Stocul nu e încă încărcat.');return;}
-  let msg='Pentru ce produs adaugi NIR?\n\n';
-  stockData.forEach((s,i)=>msg+=`${i+1}. ${s.label} (acum: ${s.qty})\n`);
-  const c=prompt(msg+'\nScrie numărul:');
-  if(!c)return;
-  const idx=parseInt(c)-1;
-  if(idx<0||idx>=stockData.length){alert('Număr invalid');return;}
-  const s=stockData[idx];
-  const delta=prompt(`${s.label} — stoc curent: ${s.qty}\n\nCâte bucăți fizice adaugi? (minus pentru scădere/corecție, ex: 200 sau -10)`);
-  if(delta===null)return;
-  const n=parseInt(delta);
-  if(isNaN(n)){alert('Valoare invalidă');return;}
-  const note=prompt('Notă (opțional, ex: "NIR furnizor X"):')||'NIR';
-  await fetch(SERVER+'/adjust',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:s.key,delta:n,note})});
+  adjustSelectedKey=null;
+  document.getElementById('adjust-modal').style.display='flex';
+  document.getElementById('adjust-search').value='';
+  document.getElementById('adjust-qty-row').style.display='none';
+  renderAdjustList('');
+  setTimeout(()=>document.getElementById('adjust-search').focus(),50);
+}
+function closeAdjust(){ document.getElementById('adjust-modal').style.display='none'; }
+function renderAdjustList(q){
+  q=q.toLowerCase();
+  const list=stockData.filter(s=>!q||s.label.toLowerCase().includes(q));
+  const el=document.getElementById('adjust-list');
+  if(!list.length){el.innerHTML='<div style="padding:16px;color:var(--dim);font-size:13px">Niciun produs găsit</div>';return;}
+  el.innerHTML=list.slice(0,100).map(s=>`
+    <div class="adjust-row" onclick="selectAdjust('${s.key}')">
+      <span>${s.label}</span>
+      <span class="mono" style="color:var(--muted)">${s.qty}</span>
+    </div>`).join('');
+}
+function selectAdjust(key){
+  adjustSelectedKey=key;
+  const s=stockData.find(x=>x.key===key);
+  document.getElementById('adjust-qty-row').style.display='block';
+  document.getElementById('adjust-selected-label').textContent=`${s.label} — stoc curent: ${s.qty}`;
+  document.getElementById('adjust-delta').value='';
+  document.getElementById('adjust-note').value='';
+  document.getElementById('adjust-delta').focus();
+}
+async function confirmAdjust(){
+  if(!adjustSelectedKey){alert('Selectează un produs mai întâi.');return;}
+  const n=parseInt(document.getElementById('adjust-delta').value);
+  if(isNaN(n)){alert('Introdu o cantitate validă.');return;}
+  const note=document.getElementById('adjust-note').value||'NIR';
+  const s=stockData.find(x=>x.key===adjustSelectedKey);
+  await fetch(SERVER+'/adjust',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:adjustSelectedKey,delta:n,note})});
+  closeAdjust();
   alert(`Stoc actualizat: ${s.label} ${n>=0?'+':''}${n} buc.`);
   load();
 }
